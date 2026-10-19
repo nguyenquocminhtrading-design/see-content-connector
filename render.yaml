@@ -78,6 +78,6 @@ services:
 databases:
   - name: see-content-connector-db
     databaseName: see_content_connector
-    user: postgres
+    user: content_user
     region: singapore
     plan: free
