@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import Badge from '../components/Badge';
 import AssetDetailModal from '../components/AssetDetailModal';
@@ -18,8 +18,9 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load Dashboard Overview
-  useEffect(() => {
+  const loadData = useCallback(() => {
+    setLoading(true);
+    setError(null);
     Promise.all([
       apiGet('/api/dashboard'),
       apiGet('/api/assets'),
@@ -54,6 +55,11 @@ export default function Dashboard() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  // Load Dashboard Overview
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   // Load Analytics trends based on range
   useEffect(() => {
@@ -96,10 +102,20 @@ export default function Dashboard() {
     >
       {loading && <p className="text-gray-500 py-16 text-center animate-pulse">Đang tải dữ liệu bảng điều khiển…</p>}
       {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-r-lg mb-6">
-          <p className="font-semibold">Không thể kết nối đến máy chủ Backend</p>
-          <p className="text-sm mt-1">{error}</p>
-          <p className="text-sm mt-2 text-gray-600">Khởi động backend bằng lệnh: <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">npm run dev:backend</code></p>
+        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-r-lg mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <p className="font-semibold text-base">Không thể kết nối đến máy chủ Backend</p>
+            <p className="text-sm mt-1">{error}</p>
+            <p className="text-sm mt-2 text-gray-600">
+              Khởi động cả hệ thống bằng lệnh: <code className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded font-mono font-medium">npm run dev</code> hoặc chạy file <code className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded font-mono font-medium">start_dev.bat</code>
+            </p>
+          </div>
+          <button
+            onClick={() => loadData()}
+            className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-600 hover:bg-red-700 text-white transition shadow-sm flex items-center gap-1.5 whitespace-nowrap"
+          >
+            🔄 Thử lại kết nối
+          </button>
         </div>
       )}
 

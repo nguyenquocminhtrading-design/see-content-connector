@@ -15,7 +15,7 @@ const poolConfig = process.env.DATABASE_URL
       user: process.env.DB_USER || 'postgres',
       password: process.env.DB_PASSWORD || 'postgres',
       database: process.env.DB_NAME || 'see_content_connector',
-      connectionTimeoutMillis: 3000,
+      connectionTimeoutMillis: 1500,
       max: 10,
     };
 
