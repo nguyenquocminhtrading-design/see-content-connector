@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (Storage for assets, metrics, connections)
+  postgres:
+    image: postgres:16-alpine
+    container_name: see_connector_db
+    environment:
+      - POSTGRES_DB=see_content_connector
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d see_content_connector"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (Cache & Worker Queue)
+  redis:
+    image: redis:7-alpine
+    container_name: see_connector_cache
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+    driver: local

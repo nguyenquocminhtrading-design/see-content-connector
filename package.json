@@ -1,0 +1,15 @@
+﻿{
+  "name": "see-content-connector",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SEE Content Connector - multi-platform content dashboard (Facebook / Instagram / LinkedIn / TikTok)",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "start:backend": "npm start --prefix backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "seed": "npm run seed --prefix backend"
+  },
+  "license": "MIT"
+}
