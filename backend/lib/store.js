@@ -28,7 +28,7 @@ async function listAssets({ platform, type, status, search, limit = 100, offset 
   params.push(limit); const lim = `$${params.length}`;
   params.push(offset); const off = `$${params.length}`;
   const sql = `
-    SELECT a.*, m.reach, m.impressions, m.likes, m.comments, m.shares, m.views,
+    SELECT a.*, a.content, m.reach, m.impressions, m.likes, m.comments, m.shares, m.views,
            m.metrics_available AS "metricsAvailable", m.metrics_error AS "metricsError",
            m.completion_rate AS "completionRate",
            a.completion_rate AS "videoCompletionRate", a.published_at AS "publishedAt", a.synced_at AS "syncedAt",
@@ -48,7 +48,7 @@ async function getAsset(id) {
   if (demoMode()) {
     return demo.getDemo().assets.find((a) => a.id === id) || null;
   }
-  const { rows } = await q(`SELECT a.*, a.published_at AS "publishedAt", a.synced_at AS "syncedAt",
+  const { rows } = await q(`SELECT a.*, a.content, a.published_at AS "publishedAt", a.synced_at AS "syncedAt",
       a.platform_post_id AS "platformPostId", a.thumbnail_url AS "thumbnailUrl", a.is_flagged AS "isFlagged",
       a.completion_rate AS "completionRate"
     FROM asset a WHERE a.id = $1`, [id]);
@@ -83,7 +83,7 @@ async function listPosts({ platform, status, from, to, search, limit = 200 }) {
   if (search) { params.push(`%${search}%`); where.push(`a.title ILIKE $${params.length}`); }
   params.push(limit);
   const sql = `
-    SELECT a.id, a.platform, a.type, a.title, a.status, a.published_at AS "publishedAt",
+    SELECT a.id, a.platform, a.type, a.title, a.content, a.status, a.published_at AS "publishedAt",
            a.is_flagged AS "isFlagged", a.thumbnail_url AS "thumbnailUrl",
            m.reach, m.impressions, m.likes, m.comments, m.shares, m.views,
            m.metrics_available AS "metricsAvailable", m.metrics_error AS "metricsError"
@@ -266,31 +266,31 @@ async function upsertAsset(asset) {
     return;
   }
   const { rows } = await q(`
-    INSERT INTO asset (connection_id, platform, platform_post_id, type, title, thumbnail_url, status, published_at, synced_at)
-    VALUES ((SELECT id FROM platform_connection WHERE platform = $1), $1, $2, $3, $4, $5, $6, $7, now())
+    INSERT INTO asset (connection_id, platform, platform_post_id, type, title, content, thumbnail_url, status, published_at, synced_at)
+    VALUES ((SELECT id FROM platform_connection WHERE platform = $1), $1, $2, $3, $4, $5, $6, $7, $8, now())
     ON CONFLICT (platform, platform_post_id) DO UPDATE SET
       title = EXCLUDED.title,
+      content = COALESCE(EXCLUDED.content, asset.content),
       thumbnail_url = COALESCE(EXCLUDED.thumbnail_url, asset.thumbnail_url),
       status = EXCLUDED.status,
       synced_at = now()
     RETURNING id`,
-    [asset.platform, asset.platformPostId, asset.type, asset.title, asset.thumbnailUrl, asset.status, asset.publishedAt]);
+    [asset.platform, asset.platformPostId, asset.type, asset.title, asset.content ?? null, asset.thumbnailUrl, asset.status, asset.publishedAt]);
 
   const assetId = rows && rows[0] ? rows[0].id : null;
   if (assetId && asset.metrics) {
     const m = asset.metrics;
+    const available = m.metricsAvailable ?? [m.reach, m.impressions, m.likes, m.comments, m.shares, m.views]
+      .some((v) => v !== null && v !== undefined);
+    if (!available && !m.metricsError) return;
     await q(`
       INSERT INTO metrics (asset_id, reach, impressions, likes, comments, shares, views,
-        metrics_available, metrics_error, completion_rate, recorded_at)
-      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now()
-      WHERE NOT EXISTS (
-        SELECT 1 FROM metrics WHERE asset_id = $1
-          AND metrics_available = true
-          AND $8 = false
-      )`,
+        metrics_available, metrics_error, platform_error_code, source, completion_rate, recorded_at)
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now()
+      WHERE NOT EXISTS (SELECT 1 FROM metrics WHERE asset_id = $1 AND metrics_available = true AND $8 = false)`,
       [assetId, m.reach ?? null, m.impressions ?? null, m.likes ?? null, m.comments ?? null,
-        m.shares ?? null, m.views ?? null, m.metricsAvailable ?? [m.reach, m.impressions, m.likes, m.comments, m.shares, m.views].some((v) => v !== null && v !== undefined),
-        m.metricsError ?? null, m.completionRate ?? null]);
+        m.shares ?? null, m.views ?? null, available, m.metricsError ?? null, m.platformErrorCode ?? null,
+        m.source ?? asset.platform, m.completionRate ?? null]);
   }
 }
 
@@ -376,6 +376,7 @@ async function debugStorage(platform = 'facebook') {
   const assets = await q(`SELECT COUNT(*)::int AS total,
     COUNT(*) FILTER (WHERE platform = $1)::int AS "platformTotal",
     COUNT(*) FILTER (WHERE title IS NOT NULL AND title <> '')::int AS "withTitle",
+    COUNT(*) FILTER (WHERE platform = $1 AND content IS NOT NULL AND content <> '')::int AS "assetsWithContent",
     COUNT(*) FILTER (WHERE title = 'Facebook Post')::int AS "defaultTitle",
     MAX(synced_at) AS "lastSyncedAt"
     FROM asset`, [platform]);

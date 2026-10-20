@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS asset (
   platform_post_id TEXT NOT NULL,
   type TEXT NOT NULL CHECK (type IN ('video','reel','photo','carousel','story','text')),
   title TEXT,
+  content TEXT,
   thumbnail_url TEXT,
   status TEXT NOT NULL DEFAULT 'published'
     CHECK (status IN ('published','scheduled','draft','failed','removed','processing','live','error')),
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS asset (
 );
 CREATE INDEX IF NOT EXISTS idx_asset_platform ON asset (platform);
 CREATE INDEX IF NOT EXISTS idx_asset_status ON asset (status);
+ALTER TABLE asset ADD COLUMN IF NOT EXISTS content TEXT;
 
 CREATE TABLE IF NOT EXISTS metrics (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -89,6 +91,12 @@ ALTER TABLE metrics ALTER COLUMN shares DROP NOT NULL;
 ALTER TABLE metrics ADD COLUMN IF NOT EXISTS views INTEGER;
 ALTER TABLE metrics ADD COLUMN IF NOT EXISTS metrics_available BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE metrics ADD COLUMN IF NOT EXISTS metrics_error TEXT;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS source TEXT;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS platform_error_code TEXT;
+
+UPDATE metrics SET metrics_available = true
+WHERE metrics_available = false
+  AND (reach IS NOT NULL OR impressions IS NOT NULL OR likes IS NOT NULL OR comments IS NOT NULL OR shares IS NOT NULL OR views IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS alert (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

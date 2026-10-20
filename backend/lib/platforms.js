@@ -247,7 +247,7 @@ async function fetchLatestAssets(connection) {
 
     for (const ep of endpoints) {
       try {
-        const res = await fetch(`${ep}?fields=id,message,permalink_url,created_time,full_picture,shares,likes.summary(true),comments.summary(true)&limit=25&access_token=${token}`);
+        const res = await fetch(`${ep}?fields=id,message,permalink_url,created_time,full_picture,shares&limit=25&access_token=${token}`);
         const data = await res.json();
         if (data && !data.error && Array.isArray(data.data)) {
           json = data;
@@ -274,18 +274,11 @@ async function fetchLatestAssets(connection) {
         platformPostId: item.id,
         type: isReel ? 'reel' : isVideo ? 'video' : 'photo',
         title: (item.message || 'Facebook Post').slice(0, 140),
+        content: item.message || null,
         thumbnailUrl: item.full_picture || null,
         status: 'published',
         publishedAt: item.created_time || null,
-        metrics: {
-          reach: null,
-          impressions: null,
-          likes: item.likes?.summary?.total_count ?? null,
-          comments: item.comments?.summary?.total_count ?? null,
-          shares: item.shares?.count ?? null,
-          views: null,
-          completionRate: null,
-        },
+        metrics: null,
       });
     }
   } else if (connection.platform === 'instagram') {
@@ -312,6 +305,7 @@ async function fetchLatestAssets(connection) {
         platformPostId: item.id,
         type: String(item.media_product_type || item.media_type || 'photo').toLowerCase().replace('feed', 'photo'),
         title: (item.caption || 'Instagram Post').slice(0, 140),
+        content: item.caption || null,
         thumbnailUrl: item.thumbnail_url || null,
         status: 'published',
         publishedAt: item.timestamp || null,
@@ -352,6 +346,7 @@ async function fetchLatestAssets(connection) {
         platformPostId: item.id,
         type: 'text',
         title: ((item.commentary || 'LinkedIn post').slice(0, 140)),
+        content: item.commentary || null,
         thumbnailUrl: null,
         status: item.lifecycleState === 'PUBLISHED' ? 'published' : 'draft',
         publishedAt: item.createdAt ? new Date(item.createdAt).toISOString() : null,
@@ -371,6 +366,7 @@ async function fetchLatestAssets(connection) {
         platformPostId: v.id,
         type: 'video',
         title: v.title || 'TikTok video',
+        content: v.title || null,
         thumbnailUrl: v.cover_url || null,
         status: 'published',
         publishedAt: v.create_time ? new Date(v.create_time * 1000).toISOString() : null,
@@ -389,12 +385,37 @@ async function fetchLatestAssets(connection) {
   return out;
 }
 
+async function fetchFacebookPostMetrics(connection, postId) {
+  const url = `${FB_API}/${encodeURIComponent(postId)}?fields=likes.summary(true),comments.summary(true),shares&access_token=${connection.access_token}`;
+  try {
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.error) {
+      return { ok: false, metrics: null, error: classifyMetaError(json.error, postId, 'post_metrics', res.status) };
+    }
+    return { ok: true, metrics: {
+      reach: null,
+      impressions: null,
+      likes: json.likes?.summary?.total_count ?? null,
+      comments: json.comments?.summary?.total_count ?? null,
+      shares: json.shares?.count ?? null,
+      views: null,
+      completionRate: null,
+      metricsAvailable: true,
+      metricsError: null,
+    } };
+  } catch (err) {
+    return { ok: false, metrics: null, error: { code: null, reason: 'network_error', message: err.message } };
+  }
+}
+
 module.exports = {
   hasCredentials,
   authorizeUrl,
   exchangeCode,
   refreshConnection,
   fetchLatestAssets,
+  fetchFacebookPostMetrics,
   baseRedirect,
   exchangeForPermanentPageToken,
   debugMetaToken,

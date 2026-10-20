@@ -184,10 +184,24 @@ router.get('/debug/facebook-pipeline', async (req, res, next) => {
     const live = connection?.access_token
       ? await platforms.testConnectionLive('facebook', connection.access_token)
       : { ok: false, message: 'No Facebook token in backend connection' };
+    let assetFetch = { ok: false, count: 0 };
+    let metricsFetch = { attempted: 0, succeeded: 0, failed: 0 };
+    if (connection?.access_token) {
+      const assets = await platforms.fetchLatestAssets({ ...connection, platform: 'facebook' });
+      assetFetch = { ok: true, count: assets.length };
+      metricsFetch.attempted = assets.length;
+      for (const asset of assets.slice(0, 25)) {
+        const metric = await platforms.fetchFacebookPostMetrics(connection, asset.platformPostId);
+        if (metric.ok) metricsFetch.succeeded += 1;
+        else metricsFetch.failed += 1;
+      }
+    }
     res.json({
       generatedAt: new Date().toISOString(),
       backend: { mode: store.demoMode() ? 'demo' : 'postgresql', nodeEnv: process.env.NODE_ENV || null, pageId: process.env.META_PAGE_ID || null },
       liveMeta: live,
+      assetFetch,
+      metricsFetch,
       storage,
       frontendChecks: {
         assetsEndpoint: '/api/assets?platform=facebook&limit=5',

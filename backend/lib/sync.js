@@ -56,13 +56,40 @@ async function runSyncNow() {
       if (!full || !full.access_token) continue;
       try {
         const assets = await platforms.fetchLatestAssets(full);
+        console.log(`[sync][${c.platform}][assets] fetched=${assets.length}`);
         for (const a of assets) {
           await store.upsertAsset({ ...a, platform: c.platform });
-          const values = a.metrics ? [a.metrics.reach, a.metrics.impressions, a.metrics.likes, a.metrics.comments, a.metrics.shares, a.metrics.views] : [];
-          if (values.some((v) => v !== null && v !== undefined)) syncedMetrics += 1;
-          else metricErrors.push({ platform: c.platform, postId: a.platformPostId, reason: 'No metrics returned by platform API' });
+          synced += 1;
         }
-        synced += assets.length;
+        console.log(`[sync][${c.platform}][assets] saved=${assets.length}`);
+
+        let metricsAttempted = 0;
+        let metricsSucceeded = 0;
+        if (c.platform === 'facebook') {
+          for (const a of assets) {
+            metricsAttempted += 1;
+            const result = await platforms.fetchFacebookPostMetrics(full, a.platformPostId);
+            if (result.ok) {
+              await store.upsertAsset({ ...a, platform: c.platform, metrics: result.metrics });
+              metricsSucceeded += 1;
+              syncedMetrics += 1;
+            } else {
+              const error = { platform: c.platform, postId: a.platformPostId, code: result.error?.code || null, reason: result.error?.reason || 'metrics_error', message: result.error?.message };
+              metricErrors.push(error);
+              console.warn(`[sync][facebook][metrics][${a.platformPostId}] code=${error.code || 'unknown'} reason=${error.reason}`);
+              await store.upsertAsset({ ...a, platform: c.platform, metrics: { metricsAvailable: false, metricsError: error.message, platformErrorCode: error.code, source: 'facebook' } });
+            }
+          }
+        } else {
+          for (const a of assets) {
+            const values = a.metrics ? [a.metrics.reach, a.metrics.impressions, a.metrics.likes, a.metrics.comments, a.metrics.shares, a.metrics.views] : [];
+            if (values.some((v) => v !== null && v !== undefined)) { syncedMetrics += 1; metricsSucceeded += 1; }
+          }
+        }
+        console.log(`[sync][${c.platform}][metrics] attempted=${metricsAttempted || assets.length} succeeded=${metricsSucceeded} failed=${(metricsAttempted || assets.length) - metricsSucceeded}`);
+        if (c.platform === 'facebook' && metricErrors.some((e) => e.platform === 'facebook')) {
+          await store.createAlert({ type: 'facebook_metrics_sync_error', severity: 'medium', message: `Facebook assets đồng bộ thành công nhưng metrics lỗi ${metricErrors.filter((e) => e.platform === 'facebook').length}/${assets.length} bài.` });
+        }
         await store.upsertConnection({ platform: c.platform, accessToken: full.access_token, refreshToken: full.refresh_token, expiresAt: full.tokenExpiresAt, status: 'connected' });
       } catch (e) {
         errors.push(`${c.platform}: ${e.message}`);
