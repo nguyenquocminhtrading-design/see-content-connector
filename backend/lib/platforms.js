@@ -180,18 +180,37 @@ async function fetchLatestAssets(connection) {
   const token = connection.access_token;
   const out = [];
   if (connection.platform === 'facebook') {
-    const pageId = process.env.META_PAGE_ID || 'me';
-    let res = await fetch(`${FB_API}/${pageId}/published_posts?fields=id,message,permalink_url,created_time,full_picture,shares&limit=25&access_token=${token}`);
-    let json = await res.json();
-    if (json.error && pageId !== 'me') {
-      res = await fetch(`${FB_API}/me/published_posts?fields=id,message,permalink_url,created_time,full_picture,shares&limit=25&access_token=${token}`);
-      json = await res.json();
-    }
-    if (json.error) {
-      if (json.error.code === 190) {
-        throw new Error(`Token Meta Page đã hết hạn (${json.error.message}). Vui lòng cập nhật META_PAGE_ACCESS_TOKEN mới trong file .env`);
+    const pageId = process.env.META_PAGE_ID;
+    const targetId = (pageId && pageId.trim() && pageId !== 'your_page_id_here') ? pageId.trim() : 'me';
+
+    // Thử các endpoint lấy bài viết theo thứ tự ưu tiên: published_posts -> feed -> posts
+    const endpoints = targetId !== 'me' 
+      ? [`${FB_API}/${targetId}/published_posts`, `${FB_API}/${targetId}/feed`, `${FB_API}/${targetId}/posts`]
+      : [`${FB_API}/me/feed`, `${FB_API}/me/posts`];
+
+    let json = null;
+    let lastError = null;
+
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(`${ep}?fields=id,message,permalink_url,created_time,full_picture,shares&limit=25&access_token=${token}`);
+        const data = await res.json();
+        if (data && !data.error && Array.isArray(data.data)) {
+          json = data;
+          break;
+        } else if (data && data.error) {
+          lastError = data.error;
+        }
+      } catch (err) {
+        lastError = { message: err.message };
       }
-      throw new Error(json.error.message);
+    }
+
+    if (!json) {
+      if (lastError && lastError.code === 190) {
+        throw new Error(`Token Meta Page đã hết hạn (${lastError.message}). Vui lòng cập nhật META_PAGE_ACCESS_TOKEN mới.`);
+      }
+      throw new Error(lastError ? lastError.message : 'Không thể lấy bài viết từ Facebook Graph API');
     }
     for (const item of json.data || []) {
       const url = item.permalink_url || '';
