@@ -150,9 +150,9 @@ async function analytics({ days = 7, platform }) {
   }
   const { rows } = await q(`
     SELECT to_char(m.recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD') AS date,
-           COALESCE(SUM(m.reach),0) AS reach, COALESCE(SUM(m.impressions),0) AS impressions,
-           COALESCE(SUM(m.likes),0) AS likes, COALESCE(SUM(m.comments),0) AS comments,
-           COALESCE(SUM(m.shares),0) AS shares
+           SUM(m.reach) AS reach, SUM(m.impressions) AS impressions,
+           SUM(m.likes) AS likes, SUM(m.comments) AS comments,
+           SUM(m.shares) AS shares
     FROM metrics m JOIN asset a ON a.id = m.asset_id
     WHERE m.recorded_at >= now() - ($1 || ' days')::interval
       AND ($2::text IS NULL OR a.platform = $2)
@@ -190,23 +190,24 @@ async function compareAnalytics({ days = 30 }) {
   const { rows } = await q(`
     SELECT a.platform,
            COUNT(DISTINCT a.id) AS posts,
-           COALESCE(SUM(m.reach),0) AS reach, COALESCE(SUM(m.impressions),0) AS impressions,
-           COALESCE(SUM(m.likes),0) AS likes, COALESCE(SUM(m.comments),0) AS comments,
-           COALESCE(SUM(m.shares),0) AS shares
+           SUM(m.reach) AS reach, SUM(m.impressions) AS impressions,
+           SUM(m.likes) AS likes, SUM(m.comments) AS comments,
+           SUM(m.shares) AS shares
     FROM asset a
     LEFT JOIN LATERAL (SELECT * FROM metrics WHERE asset_id = a.id ORDER BY recorded_at DESC LIMIT 1) m ON true
     WHERE a.published_at >= now() - ($1 || ' days')::interval
     GROUP BY a.platform`, [String(days)]);
   const conns = await listConnections();
   return platforms.map((p) => {
-    const r = rows.find((x) => x.platform === p) || { platform: p, posts: 0, reach: 0, impressions: 0, likes: 0, comments: 0, shares: 0 };
+    const r = rows.find((x) => x.platform === p) || { platform: p, posts: 0, reach: null, impressions: null, likes: null, comments: null, shares: null };
     const conn = conns.find((c) => c.platform === p);
-    const engagement = Number(r.likes) + Number(r.comments) + Number(r.shares);
+    const engagementParts = [r.likes, r.comments, r.shares].filter((v) => v !== null && v !== undefined).map(Number);
+    const engagement = engagementParts.length ? engagementParts.reduce((sum, v) => sum + v, 0) : null;
     return {
       ...r,
       status: conn ? conn.status : 'disconnected',
       engagement,
-      engagementRate: Number(r.reach) ? Math.round((engagement / Number(r.reach)) * 10000) / 100 : 0,
+      engagementRate: Number(r.reach) && engagement !== null ? Math.round((engagement / Number(r.reach)) * 10000) / 100 : null,
     };
   });
 }

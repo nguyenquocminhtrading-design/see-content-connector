@@ -262,7 +262,7 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => fmt(v)} />
-                      <Tooltip formatter={(v: any) => fmt(v)} />
+                      <Tooltip formatter={(v: any) => formatMetricValue(v)} />
                       <Legend wrapperStyle={{ fontSize: '11px' }} />
                       <Line type="monotone" dataKey="reach" name="Reach (Tiếp cận)" stroke="#2563eb" strokeWidth={2.5} dot={false} />
                       <Line type="monotone" dataKey="impressions" name="Impressions (Hiển thị)" stroke="#8b5cf6" strokeWidth={2} dot={false} />
@@ -283,11 +283,11 @@ export default function Dashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => fmt(v)} />
-                      <Tooltip formatter={(v: any) => fmt(v)} />
+                      <Tooltip formatter={(v: any) => formatMetricValue(v)} />
                       <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      <Bar dataKey="likes" name="Likes" fill="#ec4899" stackId="a" radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="comments" name="Comments" fill="#f59e0b" stackId="a" radius={[0, 0, 0, 0]} />
-                      <Bar dataKey="shares" name="Shares" fill="#10b981" stackId="a" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="likes" name="Likes" fill="#ec4899" radius={[3, 3, 0, 0]} barSize={18} />
+                      <Bar dataKey="comments" name="Comments" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={18} />
+                      <Bar dataKey="shares" name="Shares" fill="#10b981" radius={[3, 3, 0, 0]} barSize={18} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -347,10 +347,10 @@ export default function Dashboard() {
                           )}
                         </td>
                         <td className="px-4 py-3.5 text-right font-medium">{p.posts > 0 ? p.posts : 0}</td>
-                        <td className="px-4 py-3.5 text-right font-medium">{p.posts > 0 ? fmt(p.reach) : '—'}</td>
-                        <td className="px-4 py-3.5 text-right text-gray-600">{p.posts > 0 ? fmt(p.impressions) : '—'}</td>
+                        <td className="px-4 py-3.5 text-right font-medium">{p.posts > 0 ? formatMetricValue(p.reach) : '—'}</td>
+                        <td className="px-4 py-3.5 text-right text-gray-600">{p.posts > 0 ? formatMetricValue(p.impressions) : '—'}</td>
                         <td className="px-4 py-3.5 text-right text-gray-600">{p.posts > 0 ? fmt(p.engagement) : '—'}</td>
-                        <td className="px-4 py-3.5 text-right font-semibold text-emerald-600">{p.posts > 0 ? `${p.engagementRate}%` : '—'}</td>
+                        <td className="px-4 py-3.5 text-right font-semibold text-emerald-600">{p.posts > 0 ? (p.engagementRate === null || p.engagementRate === undefined ? 'N/A' : `${p.engagementRate}%`) : '—'}</td>
                       </tr>
                     );
                   })}

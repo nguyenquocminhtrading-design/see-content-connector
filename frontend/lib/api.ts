@@ -48,7 +48,8 @@ export const SEVERITY_COLORS: Record<string, string> = {
 };
 
 export function fmt(n: number | string | null | undefined): string {
-  const v = Number(n || 0);
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 'N/A';
   if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
   if (v >= 1_000) return (v / 1_000).toFixed(1) + 'K';
   return String(v);
@@ -68,6 +69,10 @@ export function formatMetricValue(value: number | string | null | undefined, pen
   if (pending) return '—';
   if (value === null || value === undefined || value === '') return 'N/A';
   return fmt(value);
+}
+
+export function metricTooltip(value: number | string | null | undefined): string {
+  return value === null || value === undefined || value === '' ? 'N/A' : fmt(value);
 }
 
 export function fmtDate(d: string | null | undefined): string {
