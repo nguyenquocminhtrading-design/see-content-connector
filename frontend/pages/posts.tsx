@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import Badge from '../components/Badge';
-import { apiGet, PLATFORM_COLORS, STATUS_COLORS, fmt, fmtDate } from '../lib/api';
+import { apiGet, PLATFORM_COLORS, STATUS_COLORS, fmtMetric, fmtDate } from '../lib/api';
 
 export default function Posts() {
   const [posts, setPosts] = useState<any[]>([]);
@@ -72,10 +72,10 @@ export default function Posts() {
                   <td className="px-4 py-3 text-gray-500">{p.type}</td>
                   <td className="px-4 py-3"><Badge label={p.status} colorMap={STATUS_COLORS} /></td>
                   <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(p.publishedAt)}</td>
-                  <td className="px-4 py-3 text-right font-medium">{fmt(p.reach)}</td>
-                  <td className="px-4 py-3 text-right">{fmt(p.likes)}</td>
-                  <td className="px-4 py-3 text-right">{fmt(p.comments)}</td>
-                  <td className="px-4 py-3 text-right">{fmt(p.shares)}</td>
+                  <td className="px-4 py-3 text-right font-medium">{fmtMetric(p.reach)}</td>
+                  <td className="px-4 py-3 text-right">{fmtMetric(p.likes)}</td>
+                  <td className="px-4 py-3 text-right">{fmtMetric(p.comments)}</td>
+                  <td className="px-4 py-3 text-right">{fmtMetric(p.shares)}</td>
                 </tr>
               ))}
               {posts.length === 0 && (

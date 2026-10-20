@@ -193,7 +193,7 @@ async function fetchLatestAssets(connection) {
 
     for (const ep of endpoints) {
       try {
-        const res = await fetch(`${ep}?fields=id,message,permalink_url,created_time,full_picture,shares&limit=25&access_token=${token}`);
+        const res = await fetch(`${ep}?fields=id,message,permalink_url,created_time,full_picture,shares,likes.summary(true),comments.summary(true)&limit=25&access_token=${token}`);
         const data = await res.json();
         if (data && !data.error && Array.isArray(data.data)) {
           json = data;
@@ -224,11 +224,13 @@ async function fetchLatestAssets(connection) {
         status: 'published',
         publishedAt: item.created_time || null,
         metrics: {
-          reach: 120 + Math.floor(Math.random() * 400),
-          impressions: 180 + Math.floor(Math.random() * 600),
-          likes: Math.floor(15 + Math.random() * 50),
-          comments: Math.floor(2 + Math.random() * 10),
-          shares: (item.shares && item.shares.count) || Math.floor(1 + Math.random() * 5),
+          reach: null,
+          impressions: null,
+          likes: item.likes?.summary?.total_count ?? null,
+          comments: item.comments?.summary?.total_count ?? null,
+          shares: item.shares?.count ?? null,
+          views: null,
+          completionRate: null,
         },
       });
     }
@@ -259,6 +261,15 @@ async function fetchLatestAssets(connection) {
         thumbnailUrl: item.thumbnail_url || null,
         status: 'published',
         publishedAt: item.timestamp || null,
+        metrics: {
+          reach: null,
+          impressions: null,
+          likes: item.like_count ?? null,
+          comments: item.comments_count ?? null,
+          shares: null,
+          views: null,
+          completionRate: null,
+        },
       });
     }
   } else if (connection.platform === 'linkedin') {
@@ -269,6 +280,20 @@ async function fetchLatestAssets(connection) {
     const json = await res.json();
     if (!res.ok) throw new Error(json.message || `LinkedIn API ${res.status}`);
     for (const item of json.elements || []) {
+      let metrics = { reach: null, impressions: null, likes: null, comments: null, shares: null, views: null, completionRate: null };
+      try {
+        const actions = await fetch(`https://api.linkedin.com/rest/socialActions/${encodeURIComponent(item.id)}`, {
+          headers: { Authorization: `Bearer ${token}`, 'LinkedIn-Version': '202401', 'X-Restli-Protocol-Version': '2.0.0' },
+        });
+        if (actions.ok) {
+          const a = await actions.json();
+          metrics.likes = a.likesSummary?.totalLikes ?? a.likesSummary?.aggregatedTotalLikes ?? null;
+          metrics.comments = a.commentsSummary?.aggregatedTotalComments ?? a.commentsSummary?.totalComments ?? null;
+          metrics.shares = a.sharesSummary?.totalShares ?? null;
+        }
+      } catch (err) {
+        console.warn(`[metrics] linkedin ${item.id}: ${err.message}`);
+      }
       out.push({
         platformPostId: item.id,
         type: 'text',
@@ -276,10 +301,11 @@ async function fetchLatestAssets(connection) {
         thumbnailUrl: null,
         status: item.lifecycleState === 'PUBLISHED' ? 'published' : 'draft',
         publishedAt: item.createdAt ? new Date(item.createdAt).toISOString() : null,
+        metrics,
       });
     }
   } else if (connection.platform === 'tiktok') {
-    const res = await fetch('https://open.tiktokapis.com/v2/video/list/?fields=id,title,cover_url,create_time,status', {
+    const res = await fetch('https://open.tiktokapis.com/v2/video/list/?fields=id,title,cover_url,create_time,status,view_count,like_count,comment_count,share_count', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ cursor: 0, max_count: 20 }),
@@ -294,6 +320,15 @@ async function fetchLatestAssets(connection) {
         thumbnailUrl: v.cover_url || null,
         status: 'published',
         publishedAt: v.create_time ? new Date(v.create_time * 1000).toISOString() : null,
+        metrics: {
+          reach: null,
+          impressions: null,
+          likes: v.like_count ?? null,
+          comments: v.comment_count ?? null,
+          shares: v.share_count ?? null,
+          views: v.view_count ?? null,
+          completionRate: null,
+        },
       });
     }
   }

@@ -68,15 +68,27 @@ CREATE INDEX IF NOT EXISTS idx_asset_status ON asset (status);
 CREATE TABLE IF NOT EXISTS metrics (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   asset_id UUID NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
-  reach INTEGER NOT NULL DEFAULT 0,
-  impressions INTEGER NOT NULL DEFAULT 0,
-  likes INTEGER NOT NULL DEFAULT 0,
-  comments INTEGER NOT NULL DEFAULT 0,
-  shares INTEGER NOT NULL DEFAULT 0,
+  reach INTEGER,
+  impressions INTEGER,
+  likes INTEGER,
+  comments INTEGER,
+  shares INTEGER,
+  views INTEGER,
+  metrics_available BOOLEAN NOT NULL DEFAULT false,
+  metrics_error TEXT,
   completion_rate REAL,
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_asset ON metrics (asset_id, recorded_at);
+
+ALTER TABLE metrics ALTER COLUMN reach DROP NOT NULL;
+ALTER TABLE metrics ALTER COLUMN impressions DROP NOT NULL;
+ALTER TABLE metrics ALTER COLUMN likes DROP NOT NULL;
+ALTER TABLE metrics ALTER COLUMN comments DROP NOT NULL;
+ALTER TABLE metrics ALTER COLUMN shares DROP NOT NULL;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS views INTEGER;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS metrics_available BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS metrics_error TEXT;
 
 CREATE TABLE IF NOT EXISTS alert (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

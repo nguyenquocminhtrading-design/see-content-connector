@@ -54,6 +54,12 @@ export function fmt(n: number | string | null | undefined): string {
   return String(v);
 }
 
+export function fmtMetric(n: number | string | null | undefined, pending = false): string {
+  if (pending) return '—';
+  if (n === null || n === undefined || n === '') return 'N/A';
+  return fmt(n);
+}
+
 export function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
   return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });

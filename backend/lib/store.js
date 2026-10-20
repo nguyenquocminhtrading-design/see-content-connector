@@ -28,7 +28,9 @@ async function listAssets({ platform, type, status, search, limit = 100, offset 
   params.push(limit); const lim = `$${params.length}`;
   params.push(offset); const off = `$${params.length}`;
   const sql = `
-    SELECT a.*, m.reach, m.impressions, m.likes, m.comments, m.shares, m.completion_rate AS "completionRate",
+    SELECT a.*, m.reach, m.impressions, m.likes, m.comments, m.shares, m.views,
+           m.metrics_available AS "metricsAvailable", m.metrics_error AS "metricsError",
+           m.completion_rate AS "completionRate",
            a.completion_rate AS "videoCompletionRate", a.published_at AS "publishedAt", a.synced_at AS "syncedAt",
            a.platform_post_id AS "platformPostId", a.thumbnail_url AS "thumbnailUrl", a.is_flagged AS "isFlagged"
     FROM asset a
@@ -51,7 +53,9 @@ async function getAsset(id) {
       a.completion_rate AS "completionRate"
     FROM asset a WHERE a.id = $1`, [id]);
   if (!rows[0]) return null;
-  const metrics = await q(`SELECT reach, impressions, likes, comments, shares, completion_rate AS "completionRate", recorded_at AS "recordedAt"
+  const metrics = await q(`SELECT reach, impressions, likes, comments, shares, views,
+    metrics_available AS "metricsAvailable", metrics_error AS "metricsError",
+    completion_rate AS "completionRate", recorded_at AS "recordedAt"
     FROM metrics WHERE asset_id = $1 ORDER BY recorded_at DESC LIMIT 1`, [id]);
   const history = await q(`SELECT to_char(recorded_at,'YYYY-MM-DD') AS date, reach, impressions, likes, comments, shares
     FROM metrics WHERE asset_id = $1 ORDER BY recorded_at ASC`, [id]);
@@ -81,7 +85,8 @@ async function listPosts({ platform, status, from, to, search, limit = 200 }) {
   const sql = `
     SELECT a.id, a.platform, a.type, a.title, a.status, a.published_at AS "publishedAt",
            a.is_flagged AS "isFlagged", a.thumbnail_url AS "thumbnailUrl",
-           m.reach, m.impressions, m.likes, m.comments, m.shares
+           m.reach, m.impressions, m.likes, m.comments, m.shares, m.views,
+           m.metrics_available AS "metricsAvailable", m.metrics_error AS "metricsError"
     FROM asset a
     LEFT JOIN LATERAL (SELECT * FROM metrics WHERE asset_id = a.id ORDER BY recorded_at DESC LIMIT 1) m ON true
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -275,9 +280,17 @@ async function upsertAsset(asset) {
   if (assetId && asset.metrics) {
     const m = asset.metrics;
     await q(`
-      INSERT INTO metrics (asset_id, reach, impressions, likes, comments, shares, completion_rate, recorded_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-      [assetId, m.reach || 0, m.impressions || 0, m.likes || 0, m.comments || 0, m.shares || 0, m.completionRate || null]);
+      INSERT INTO metrics (asset_id, reach, impressions, likes, comments, shares, views,
+        metrics_available, metrics_error, completion_rate, recorded_at)
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now()
+      WHERE NOT EXISTS (
+        SELECT 1 FROM metrics WHERE asset_id = $1
+          AND metrics_available = true
+          AND $8 = false
+      )`,
+      [assetId, m.reach ?? null, m.impressions ?? null, m.likes ?? null, m.comments ?? null,
+        m.shares ?? null, m.views ?? null, m.metricsAvailable ?? [m.reach, m.impressions, m.likes, m.comments, m.shares, m.views].some((v) => v !== null && v !== undefined),
+        m.metricsError ?? null, m.completionRate ?? null]);
   }
 }
 

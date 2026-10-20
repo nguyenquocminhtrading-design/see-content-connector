@@ -19,6 +19,8 @@ async function runSyncNow() {
 
     const connections = await store.listConnections();
     let synced = 0;
+    let syncedMetrics = 0;
+    const metricErrors = [];
     const errors = [];
 
     for (const c of connections) {
@@ -56,6 +58,9 @@ async function runSyncNow() {
         const assets = await platforms.fetchLatestAssets(full);
         for (const a of assets) {
           await store.upsertAsset({ ...a, platform: c.platform });
+          const values = a.metrics ? [a.metrics.reach, a.metrics.impressions, a.metrics.likes, a.metrics.comments, a.metrics.shares, a.metrics.views] : [];
+          if (values.some((v) => v !== null && v !== undefined)) syncedMetrics += 1;
+          else metricErrors.push({ platform: c.platform, postId: a.platformPostId, reason: 'No metrics returned by platform API' });
         }
         synced += assets.length;
         await store.upsertConnection({ platform: c.platform, accessToken: full.access_token, refreshToken: full.refresh_token, expiresAt: full.tokenExpiresAt, status: 'connected' });
@@ -80,7 +85,7 @@ async function runSyncNow() {
       }
     }
 
-    lastResult = { mode: isDbReady() ? 'postgresql' : 'demo', ok: errors.length === 0, synced, errors, at: lastRun };
+    lastResult = { mode: isDbReady() ? 'postgresql' : 'demo', ok: errors.length === 0, synced, syncedAssets: synced, syncedMetrics, metricErrors, errors, at: lastRun };
     console.log(`[sync] done (${isDbReady() ? 'postgresql' : 'demo'}) — synced ${synced} assets, ${errors.length} errors`);
     return lastResult;
   } catch (err) {
