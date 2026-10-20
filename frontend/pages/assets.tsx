@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import Badge from '../components/Badge';
 import AssetDetailModal from '../components/AssetDetailModal';
-import { apiGet, PLATFORM_COLORS, STATUS_COLORS, fmt, fmtDate } from '../lib/api';
+import { apiGet, PLATFORM_COLORS, STATUS_COLORS, fmt, fmtDate, getMetric, formatMetricValue } from '../lib/api';
 
 export default function Assets() {
   const [assets, setAssets] = useState<any[]>([]);
@@ -60,8 +60,10 @@ export default function Assets() {
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {assets.map((a) => {
-              const reach = Number(a.metrics?.reach || 0);
-              const likes = Number(a.metrics?.likes || 0);
+              const reachValue = getMetric(a, 'reach');
+              const likesValue = getMetric(a, 'likes');
+              const reach = Number(reachValue ?? 0);
+              const likes = Number(likesValue ?? 0);
               const engRate = reach > 0 ? ((likes / reach) * 100).toFixed(1) : 0;
               const isViral = Number(engRate) > 5 || reach > 30000;
 
@@ -110,11 +112,11 @@ export default function Assets() {
                       </h3>
                       <div className="grid grid-cols-3 gap-2 mt-3 text-center text-xs bg-gray-50 p-2.5 rounded-lg border border-gray-100">
                         <div>
-                          <p className="font-bold text-gray-900">{fmt(a.metrics?.reach)}</p>
+                        <p className="font-bold text-gray-900">{formatMetricValue(reachValue)}</p>
                           <p className="text-[10px] text-gray-400 uppercase">Reach</p>
                         </div>
                         <div>
-                          <p className="font-bold text-gray-900">{fmt(a.metrics?.likes)}</p>
+                        <p className="font-bold text-gray-900">{formatMetricValue(likesValue)}</p>
                           <p className="text-[10px] text-gray-400 uppercase">Likes</p>
                         </div>
                         <div>
@@ -124,6 +126,11 @@ export default function Assets() {
                           <p className="text-[10px] text-gray-400 uppercase">Retention</p>
                         </div>
                       </div>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2 text-[10px] text-gray-400">
+                      {a.metricsPartial && <span className="text-amber-600">Metrics chưa đầy đủ</span>}
+                      {a.metricsAvailable === false && <span>Metrics chưa khả dụng</span>}
+                      {a.metricsError && <span className="text-rose-600" title={a.metricsError}>⚠ Metrics warning</span>}
                     </div>
 
                     <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">

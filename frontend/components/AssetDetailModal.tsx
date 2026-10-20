@@ -1,6 +1,6 @@
 import React from 'react';
 import Badge from './Badge';
-import { PLATFORM_COLORS, STATUS_COLORS, fmt, fmtDate } from '../lib/api';
+import { PLATFORM_COLORS, STATUS_COLORS, fmt, fmtDate, getMetric, formatMetricValue } from '../lib/api';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar
@@ -14,12 +14,16 @@ interface AssetDetailModalProps {
 export default function AssetDetailModal({ asset, onClose }: AssetDetailModalProps) {
   if (!asset) return null;
 
-  const m = asset.metrics || {};
-  const reach = Number(m.reach || 0);
-  const impressions = Number(m.impressions || 0);
-  const likes = Number(m.likes || 0);
-  const comments = Number(m.comments || 0);
-  const shares = Number(m.shares || 0);
+  const reachValue = getMetric(asset, 'reach');
+  const impressionsValue = getMetric(asset, 'impressions');
+  const likesValue = getMetric(asset, 'likes');
+  const commentsValue = getMetric(asset, 'comments');
+  const sharesValue = getMetric(asset, 'shares');
+  const reach = Number(reachValue ?? 0);
+  const impressions = Number(impressionsValue ?? 0);
+  const likes = Number(likesValue ?? 0);
+  const comments = Number(commentsValue ?? 0);
+  const shares = Number(sharesValue ?? 0);
   const totalEngagement = likes + comments + shares;
   const engRate = reach > 0 ? ((totalEngagement / reach) * 100).toFixed(2) : '0.00';
   const completionRate = asset.completionRate != null ? Math.round(asset.completionRate * 100) : null;
@@ -120,6 +124,7 @@ export default function AssetDetailModal({ asset, onClose }: AssetDetailModalPro
             </div>
             <div className="flex-1 space-y-2">
               <h2 className="text-xl font-bold text-gray-900 leading-snug">{asset.title}</h2>
+              <p className="text-sm text-gray-600 whitespace-pre-wrap max-h-32 overflow-y-auto">{asset.content || asset.title || 'N/A'}</p>
               <div className="text-xs text-gray-500 flex flex-wrap gap-x-4 gap-y-1">
                 <span>📅 Đăng lúc: <strong>{fmtDate(asset.publishedAt)}</strong></span>
                 <span>🔄 Đồng bộ lúc: <strong>{fmtDate(asset.syncedAt)}</strong></span>
@@ -146,12 +151,12 @@ export default function AssetDetailModal({ asset, onClose }: AssetDetailModalPro
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
             <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
               <p className="text-xs text-gray-500 uppercase font-medium">Lượt tiếp cận</p>
-              <p className="text-xl font-bold text-blue-600 mt-0.5">{fmt(reach)}</p>
+              <p className="text-xl font-bold text-blue-600 mt-0.5">{formatMetricValue(reachValue)}</p>
               <p className="text-[10px] text-gray-400">Reach</p>
             </div>
             <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
               <p className="text-xs text-gray-500 uppercase font-medium">Lượt hiển thị</p>
-              <p className="text-xl font-bold text-purple-600 mt-0.5">{fmt(impressions)}</p>
+              <p className="text-xl font-bold text-purple-600 mt-0.5">{formatMetricValue(impressionsValue)}</p>
               <p className="text-[10px] text-gray-400">Impressions</p>
             </div>
             <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
@@ -214,6 +219,17 @@ export default function AssetDetailModal({ asset, onClose }: AssetDetailModalPro
                 </ResponsiveContainer>
               </div>
             </div>
+          </div>
+
+          <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              <span>Asset synced: {fmtDate(asset.syncedAt)}</span>
+              <span>Metrics recorded: {fmtDate(asset.metricsRecordedAt || asset.metrics?.recordedAt)}</span>
+              <span>Source: {asset.metricsSource || asset.metrics?.metricsSource || 'N/A'}</span>
+              <span>Available: {asset.metricsAvailable == null ? '—' : asset.metricsAvailable ? 'Yes' : 'No'}</span>
+              {asset.metricsPartial && <span className="text-amber-600">Partial metrics</span>}
+            </div>
+            {asset.metricsError && <p className="mt-1 text-rose-600">Metrics warning: {asset.metricsError}</p>}
           </div>
 
           {/* Footer Actions */}

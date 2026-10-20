@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import Badge from '../components/Badge';
 import AssetDetailModal from '../components/AssetDetailModal';
-import { apiGet, apiSend, PLATFORM_COLORS, SEVERITY_COLORS, fmt, fmtDate } from '../lib/api';
+import { apiGet, apiSend, PLATFORM_COLORS, SEVERITY_COLORS, fmt, fmtDate, getMetric, formatMetricValue } from '../lib/api';
 import Link from 'next/link';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -31,12 +31,12 @@ export default function Dashboard() {
         // Compute Top 5 most popular/performing assets
         const assets = assetsData.assets || [];
         const evaluated = assets
-          .filter((a: any) => a.metrics && (a.status === 'published' || a.status === 'live'))
+          .filter((a: any) => (a.metrics || a.metricsAvailable !== undefined) && (a.status === 'published' || a.status === 'live'))
           .map((a: any) => {
-            const reach = Number(a.metrics?.reach || 0);
-            const likes = Number(a.metrics?.likes || 0);
-            const comments = Number(a.metrics?.comments || 0);
-            const shares = Number(a.metrics?.shares || 0);
+            const reach = Number(getMetric(a, 'reach') ?? 0);
+            const likes = Number(getMetric(a, 'likes') ?? 0);
+            const comments = Number(getMetric(a, 'comments') ?? 0);
+            const shares = Number(getMetric(a, 'shares') ?? 0);
             const totalEng = likes + comments + shares;
             const engRate = reach > 0 ? (totalEng / reach) * 100 : 0;
             const viralScore = Math.min(Math.round(engRate * 8 + (reach / 1000) * 1.5 + shares * 0.8), 99);
@@ -207,7 +207,7 @@ export default function Dashboard() {
                     <div className="mt-3 pt-2.5 border-t border-gray-200 flex items-center justify-between text-xs">
                       <div>
                         <p className="text-[10px] text-gray-400 uppercase">Reach</p>
-                        <p className="font-bold text-gray-800">{fmt(asset.metrics?.reach)}</p>
+                        <p className="font-bold text-gray-800">{formatMetricValue(getMetric(asset, 'reach'))}</p>
                       </div>
                       <div className="text-right">
                         <p className="text-[10px] text-gray-400 uppercase">Tỷ lệ tương tác</p>

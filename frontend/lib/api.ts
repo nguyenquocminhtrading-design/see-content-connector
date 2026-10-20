@@ -60,6 +60,16 @@ export function fmtMetric(n: number | string | null | undefined, pending = false
   return fmt(n);
 }
 
+export function getMetric(asset: any, key: string): number | string | null {
+  return asset?.[key] ?? asset?.metrics?.[key] ?? null;
+}
+
+export function formatMetricValue(value: number | string | null | undefined, pending = false): string {
+  if (pending) return '—';
+  if (value === null || value === undefined || value === '') return 'N/A';
+  return fmt(value);
+}
+
 export function fmtDate(d: string | null | undefined): string {
   if (!d) return '—';
   return new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
