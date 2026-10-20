@@ -95,15 +95,15 @@ async function ensureEnvConnections() {
     if (metaToken && !metaToken.startsWith('your_') && metaToken.trim()) {
       const token = metaToken.trim();
       for (const platform of ['facebook', 'instagram']) {
-        const exist = await pool.query('SELECT id, access_token FROM platform_connection WHERE platform = $1', [platform]);
+        const exist = await pool.query('SELECT id, access_token, status FROM platform_connection WHERE platform = $1', [platform]);
         if (exist.rows.length === 0) {
           await pool.query(
             'INSERT INTO platform_connection (platform, access_token, status) VALUES ($1, $2, $3)',
             [platform, token, 'connected']
           );
-        } else if (!exist.rows[0].access_token) {
+        } else if (exist.rows[0].access_token !== token || exist.rows[0].status === 'expired') {
           await pool.query(
-            'UPDATE platform_connection SET access_token = $1, status = $2 WHERE platform = $3',
+            'UPDATE platform_connection SET access_token = $1, status = $2, token_expires_at = null WHERE platform = $3',
             [token, 'connected', platform]
           );
         }
