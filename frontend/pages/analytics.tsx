@@ -4,7 +4,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   BarChart, Bar, ResponsiveContainer,
 } from 'recharts';
-import { apiGet, PLATFORM_COLORS, fmt, formatMetricValue } from '../lib/api';
+import { apiGet, PLATFORM_COLORS, fmt, formatMetricValue, getAvailableSeries } from '../lib/api';
 import Badge from '../components/Badge';
 
 const COLORS = ['#2563eb', '#ec4899', '#6366f1', '#111827'];
@@ -26,6 +26,12 @@ export default function Analytics() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [range]);
+
+  const distributionSeries = getAvailableSeries(series, ['reach', 'impressions', 'viewers']);
+  const videoSeries = getAvailableSeries(series, ['views', 'views3Seconds', 'views60Seconds']);
+  const engagementSeries = getAvailableSeries(series, ['likes', 'comments', 'shares', 'engagements']);
+  const hasDistributionData = distributionSeries.length > 0;
+  const hasVideoData = videoSeries.length > 0;
 
   return (
     <Layout
@@ -62,13 +68,50 @@ export default function Analytics() {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
                   <Tooltip formatter={(v: any) => formatMetricValue(v)} />
                   <Legend />
-                  <Line type="monotone" dataKey="reach" stroke="#2563eb" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="impressions" stroke="#8b5cf6" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="likes" stroke="#ec4899" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="comments" stroke="#f59e0b" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="shares" stroke="#10b981" strokeWidth={2} dot={false} />
+                  {distributionSeries.includes('reach') && <Line type="monotone" dataKey="reach" name="Reach" stroke="#2563eb" strokeWidth={2} dot={false} />}
+                  {distributionSeries.includes('impressions') && <Line type="monotone" dataKey="impressions" name="Impressions" stroke="#8b5cf6" strokeWidth={2} dot={false} />}
+                  {engagementSeries.includes('likes') && <Line type="monotone" dataKey="likes" name="Likes" stroke="#ec4899" strokeWidth={2} dot={false} />}
+                  {engagementSeries.includes('comments') && <Line type="monotone" dataKey="comments" name="Comments" stroke="#f59e0b" strokeWidth={2} dot={false} />}
+                  {engagementSeries.includes('shares') && <Line type="monotone" dataKey="shares" name="Shares" stroke="#10b981" strokeWidth={2} dot={false} />}
                 </LineChart>
               </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-white border border-gray-200 rounded-lg p-5">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Phân phối bài viết</h2>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  {hasDistributionData ? <BarChart data={series} barCategoryGap="18%" barGap={4}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
+                    <Tooltip formatter={(v: any) => formatMetricValue(v)} />
+                    <Legend />
+                    {distributionSeries.includes('reach') && <Bar dataKey="reach" name="Reach" fill="#2563eb" barSize={14} />}
+                    {distributionSeries.includes('impressions') && <Bar dataKey="impressions" name="Impressions" fill="#8b5cf6" barSize={14} />}
+                    {distributionSeries.includes('viewers') && <Bar dataKey="viewers" name="Viewers" fill="#06b6d4" barSize={14} />}
+                  </BarChart> : <div className="h-full flex items-center justify-center text-sm text-gray-400">Chưa có dữ liệu phân phối thật từ nền tảng</div>}
+                </ResponsiveContainer>
+              </div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-5">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Hiệu suất video</h2>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  {hasVideoData ? <BarChart data={series} barCategoryGap="18%" barGap={4}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
+                    <Tooltip formatter={(v: any) => formatMetricValue(v)} />
+                    <Legend />
+                    {videoSeries.includes('views') && <Bar dataKey="views" name="Views" fill="#4f46e5" barSize={14} />}
+                    {videoSeries.includes('views3Seconds') && <Bar dataKey="views3Seconds" name="Views 3s" fill="#f59e0b" barSize={14} />}
+                    {videoSeries.includes('views60Seconds') && <Bar dataKey="views60Seconds" name="Views 1m" fill="#ef4444" barSize={14} />}
+                  </BarChart> : <div className="h-full flex items-center justify-center text-sm text-gray-400">Chưa có dữ liệu video thật từ nền tảng</div>}
+                </ResponsiveContainer>
+              </div>
             </div>
           </section>
 

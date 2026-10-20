@@ -49,7 +49,7 @@ function authorizeUrl(platform, state) {
     case 'instagram':
       return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${c.id}&redirect_uri=${redirect}&state=${state}&scope=instagram_basic,instagram_content_publish,instagram_manage_comments,instagram_manage_insights`;
     case 'linkedin':
-      return `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${c.id}&redirect_uri=${redirect}&state=${state}&scope=r_organization_social,w_organization_social`;
+      return `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${c.id}&redirect_uri=${redirect}&state=${state}&scope=${encodeURIComponent('openid profile email r_organization_social w_organization_social rw_organization_admin')}`;
     case 'tiktok':
       return `https://www.tiktok.com/v2/auth/authorize/?client_key=${c.id}&response_type=code&redirect_uri=${redirect}&state=${state}&scopes=user.info.basic,video.list,video.insights`;
     default:
@@ -181,7 +181,20 @@ async function testConnectionLive(platform, token) {
       });
       const json = await res.json();
       if (!res.ok) return { ok: false, message: json.message || `Status ${res.status}` };
-      return { ok: true, name: json.name };
+      const urn = process.env.LINKEDIN_ORGANIZATION_URN;
+      if (!urn) return { ok: false, reason: 'missing_organization_urn', message: 'LINKEDIN_ORGANIZATION_URN chưa được cấu hình.' };
+      const organizationId = urn.split(':').pop();
+      const orgRes = await fetch(`https://api.linkedin.com/rest/organizations/${encodeURIComponent(organizationId)}`, {
+        headers: { Authorization: `Bearer ${token}`, 'LinkedIn-Version': '202401', 'X-Restli-Protocol-Version': '2.0.0' },
+      });
+      const orgJson = await orgRes.json();
+      if (!orgRes.ok) return { ok: false, reason: /403|permission/i.test(orgJson.message || '') ? 'permission_error' : 'wrong_organization', message: orgJson.message || `Organization API ${orgRes.status}` };
+      const postsRes = await fetch(`https://api.linkedin.com/rest/posts?author=${encodeURIComponent(urn)}&count=1`, {
+        headers: { Authorization: `Bearer ${token}`, 'LinkedIn-Version': '202401', 'X-Restli-Protocol-Version': '2.0.0' },
+      });
+      const postsJson = await postsRes.json();
+      if (!postsRes.ok) return { ok: false, reason: 'permission_error', message: postsJson.message || `Posts API ${postsRes.status}` };
+      return { ok: true, name: json.name, organization: orgJson.name || urn, canReadPosts: true };
     }
     return { ok: true, message: 'Kết nối hợp lệ' };
   } catch (err) {
@@ -375,6 +388,36 @@ async function fetchLatestAssets(connection) {
       return [];
     }
     for (const item of json.data || []) {
+      const metrics = {
+        reach: null, impressions: null, viewers: null, engagements: null,
+        likes: item.like_count ?? null, comments: item.comments_count ?? null, shares: null,
+        views: null, watchTimeSeconds: null, averageWatchTimeSeconds: null,
+        views3Seconds: null, views60Seconds: null, netFollowers: null,
+        metricsAvailable: item.like_count != null || item.comments_count != null,
+        metricsPartial: true, source: 'instagram_media_api', metricsError: null,
+      };
+      try {
+        const insightNames = 'reach,impressions,saved,shares,total_interactions,plays,video_views,ig_reels_video_view_total_time,ig_reels_avg_watch_time';
+        const insightRes = await fetch(`${FB_API}/${encodeURIComponent(item.id)}/insights?metric=${insightNames}`, { headers: { Authorization: `Bearer ${token}` } });
+        const insightJson = await insightRes.json();
+        if (!insightJson.error) {
+          const insightValues = {};
+          for (const insight of insightJson.data || []) insightValues[insight.name] = insight.values?.[0]?.value ?? insight.value ?? null;
+          metrics.reach = insightValues.reach ?? null;
+          metrics.impressions = insightValues.impressions ?? null;
+          metrics.shares = insightValues.shares ?? null;
+          metrics.engagements = insightValues.total_interactions ?? null;
+          metrics.views = insightValues.video_views ?? insightValues.plays ?? null;
+          metrics.watchTimeSeconds = insightValues.ig_reels_video_view_total_time ?? null;
+          metrics.averageWatchTimeSeconds = insightValues.ig_reels_avg_watch_time ?? null;
+          metrics.metricsAvailable = true;
+          metrics.metricsPartial = false;
+        } else {
+          metrics.metricsError = insightJson.error.message || `Instagram insights API ${insightRes.status}`;
+        }
+      } catch (err) {
+        metrics.metricsError = err.message;
+      }
       out.push({
         platformPostId: item.id,
         type: String(item.media_product_type || item.media_type || 'photo').toLowerCase().replace('feed', 'photo'),
@@ -383,15 +426,7 @@ async function fetchLatestAssets(connection) {
         thumbnailUrl: item.thumbnail_url || null,
         status: 'published',
         publishedAt: item.timestamp || null,
-        metrics: {
-          reach: null,
-          impressions: null,
-          likes: item.like_count ?? null,
-          comments: item.comments_count ?? null,
-          shares: null,
-          views: null,
-          completionRate: null,
-        },
+        metrics: { ...metrics, completionRate: null },
       });
     }
   } else if (connection.platform === 'linkedin') {
@@ -412,9 +447,21 @@ async function fetchLatestAssets(connection) {
           metrics.likes = a.likesSummary?.totalLikes ?? a.likesSummary?.aggregatedTotalLikes ?? null;
           metrics.comments = a.commentsSummary?.aggregatedTotalComments ?? a.commentsSummary?.totalComments ?? null;
           metrics.shares = a.sharesSummary?.totalShares ?? null;
+          const actionValues = [metrics.likes, metrics.comments, metrics.shares];
+          metrics.engagements = actionValues.some((v) => v !== null && v !== undefined)
+            ? actionValues.reduce((sum, v) => sum + (v == null ? 0 : Number(v)), 0) : null;
+          metrics.metricsAvailable = actionValues.some((v) => v !== null && v !== undefined);
+          metrics.metricsPartial = false;
+          metrics.source = 'linkedin_social_actions';
+        } else {
+          const error = await actions.json().catch(() => ({}));
+          metrics.metricsError = error.message || `LinkedIn social actions API ${actions.status}`;
+          metrics.metricsPartial = true;
         }
       } catch (err) {
         console.warn(`[metrics] linkedin ${item.id}: ${err.message}`);
+        metrics.metricsError = err.message;
+        metrics.metricsPartial = true;
       }
       out.push({
         platformPostId: item.id,
@@ -428,7 +475,7 @@ async function fetchLatestAssets(connection) {
       });
     }
   } else if (connection.platform === 'tiktok') {
-    const res = await fetch('https://open.tiktokapis.com/v2/video/list/?fields=id,title,cover_url,create_time,status,view_count,like_count,comment_count,share_count', {
+    const res = await fetch('https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,cover_image_url,cover_url,create_time,status,view_count,like_count,comment_count,share_count', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ cursor: 0, max_count: 20 }),
@@ -439,9 +486,9 @@ async function fetchLatestAssets(connection) {
       out.push({
         platformPostId: v.id,
         type: 'video',
-        title: v.title || 'TikTok video',
-        content: v.title || null,
-        thumbnailUrl: v.cover_url || null,
+        title: v.title || v.video_description || 'TikTok video',
+        content: v.video_description || v.title || null,
+        thumbnailUrl: v.cover_image_url || v.cover_url || null,
         status: 'published',
         publishedAt: v.create_time ? new Date(v.create_time * 1000).toISOString() : null,
         metrics: {
@@ -451,7 +498,12 @@ async function fetchLatestAssets(connection) {
           comments: v.comment_count ?? null,
           shares: v.share_count ?? null,
           views: v.view_count ?? null,
+          engagements: [v.like_count, v.comment_count, v.share_count].some((n) => n !== null && n !== undefined)
+            ? [v.like_count, v.comment_count, v.share_count].reduce((sum, n) => sum + (n == null ? 0 : Number(n)), 0) : null,
           completionRate: null,
+          metricsAvailable: [v.view_count, v.like_count, v.comment_count, v.share_count].some((n) => n !== null && n !== undefined),
+          metricsPartial: true,
+          source: 'tiktok_video_api',
         },
       });
     }
@@ -483,24 +535,57 @@ async function fetchFacebookPostMetrics(connection, postId) {
   }
 }
 
-async function fetchFacebookPostInsights(connection, postId) {
-  const metrics = 'post_impressions,post_reach,post_engaged_users,post_video_views';
-  const url = `${FB_API}/${encodeURIComponent(postId)}/insights?metric=${metrics}&access_token=${connection.access_token}`;
-  try {
-    const res = await fetch(url);
-    const json = await res.json();
-    if (json.error) return { ok: false, metrics: null, error: classifyMetaError(json.error, postId, 'post_insights', res.status) };
-    const values = {};
-    for (const item of json.data || []) values[item.name] = item.values?.[0]?.value ?? item.value ?? null;
-    return { ok: true, metrics: {
-      reach: values.post_reach ?? null,
-      impressions: values.post_impressions ?? null,
-      engagedUsers: values.post_engaged_users ?? null,
-      views: values.post_video_views ?? null,
-    } };
-  } catch (err) {
-    return { ok: false, metrics: null, error: { code: null, reason: 'network_error', message: err.message } };
+async function fetchFacebookPostInsights(connection, postId, assetType = null) {
+  const isVideo = ['video', 'reel'].includes(String(assetType || '').toLowerCase());
+  const metricNames = ['post_impressions', 'post_impressions_unique', 'post_reach', 'post_engaged_users'];
+  if (isVideo) metricNames.push('post_video_views', 'post_video_views_unique', 'post_video_avg_time_watched', 'post_video_views_3s', 'post_video_views_60s', 'post_video_view_time');
+  const values = {};
+  const errors = [];
+  const returned = [];
+  const probes = {};
+  for (const metric of metricNames) {
+    try {
+      const url = `${FB_API}/${encodeURIComponent(postId)}/insights?metric=${encodeURIComponent(metric)}&access_token=${connection.access_token}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      if (json.error) {
+        const error = { metric, status: res.status, code: json.error.code || null, subcode: json.error.error_subcode || null, reason: json.error.code === 100 ? 'unsupported_metric' : 'insights_error', message: json.error.message, requestId: res.headers.get('x-fb-trace-id') || res.headers.get('x-fb-request-id') || null };
+        errors.push(error);
+        probes[metric] = { ...error, ok: false, returned: false, value: null };
+        continue;
+      }
+      const item = (json.data || [])[0];
+      if (item) {
+        values[item.name] = item.values?.[0]?.value ?? item.value ?? null;
+        returned.push(item.name);
+        probes[metric] = { metric, status: res.status, ok: true, returned: true, value: values[item.name], requestId: res.headers.get('x-fb-trace-id') || res.headers.get('x-fb-request-id') || null };
+      } else {
+        probes[metric] = { metric, status: res.status, ok: true, returned: false, value: null, requestId: res.headers.get('x-fb-trace-id') || res.headers.get('x-fb-request-id') || null };
+      }
+    } catch (err) {
+      const error = { metric, status: null, code: null, subcode: null, reason: 'network_error', message: err.message, requestId: null };
+      errors.push(error);
+      probes[metric] = { ...error, ok: false, returned: false, value: null };
+    }
   }
+  const metrics = {
+    reach: values.post_reach ?? null,
+    impressions: values.post_impressions ?? null,
+    viewers: values.post_impressions_unique ?? values.post_video_views_unique ?? null,
+    engagements: values.post_engaged_users ?? null,
+    views: values.post_video_views ?? null,
+    watchTimeSeconds: values.post_video_view_time ?? null,
+    averageWatchTimeSeconds: values.post_video_avg_time_watched ?? null,
+    views3Seconds: values.post_video_views_3s ?? null,
+    views60Seconds: values.post_video_views_60s ?? null,
+    metricsAvailable: returned.length > 0,
+    metricsPartial: errors.length > 0,
+    metricsError: errors.length ? errors.map((e) => `${e.metric}: ${e.message || e.reason}`).join(' | ') : null,
+    insightErrors: errors,
+    returnedInsights: returned,
+    probes,
+  };
+  return { ok: returned.length > 0, metrics, error: errors.length && returned.length === 0 ? errors[0] : null };
 }
 
 module.exports = {

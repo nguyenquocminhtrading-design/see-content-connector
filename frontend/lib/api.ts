@@ -65,6 +65,14 @@ export function getMetric(asset: any, key: string): number | string | null {
   return asset?.[key] ?? asset?.metrics?.[key] ?? null;
 }
 
+export function hasMetricValue(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== '';
+}
+
+export function getAvailableSeries<T extends Record<string, any>>(rows: T[], keys: string[]): string[] {
+  return keys.filter((key) => rows.some((row) => hasMetricValue(row?.[key])));
+}
+
 export function formatMetricValue(value: number | string | null | undefined, pending = false): string {
   if (pending) return '—';
   if (value === null || value === undefined || value === '') return 'N/A';

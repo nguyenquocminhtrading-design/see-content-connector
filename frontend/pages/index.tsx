@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 import Badge from '../components/Badge';
 import AssetDetailModal from '../components/AssetDetailModal';
-import { apiGet, apiSend, PLATFORM_COLORS, SEVERITY_COLORS, fmt, fmtDate, getMetric, formatMetricValue } from '../lib/api';
+import { apiGet, apiSend, PLATFORM_COLORS, SEVERITY_COLORS, fmt, fmtDate, getMetric, formatMetricValue, getAvailableSeries } from '../lib/api';
 import Link from 'next/link';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -17,6 +17,9 @@ export default function Dashboard() {
   const [chartRange, setChartRange] = useState<string>('30');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const distributionSeries = getAvailableSeries(analyticsSeries, ['reach', 'impressions']);
+  const engagementSeries = getAvailableSeries(analyticsSeries, ['likes', 'comments', 'shares']);
 
   const loadData = useCallback(() => {
     setLoading(true);
@@ -264,8 +267,8 @@ export default function Dashboard() {
                       <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => fmt(v)} />
                       <Tooltip formatter={(v: any) => formatMetricValue(v)} />
                       <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      <Line type="monotone" dataKey="reach" name="Reach (Tiếp cận)" stroke="#2563eb" strokeWidth={2.5} dot={false} />
-                      <Line type="monotone" dataKey="impressions" name="Impressions (Hiển thị)" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                    {distributionSeries.includes('reach') && <Line type="monotone" dataKey="reach" name="Reach (Tiếp cận)" stroke="#2563eb" strokeWidth={2.5} dot={false} />}
+                    {distributionSeries.includes('impressions') && <Line type="monotone" dataKey="impressions" name="Impressions (Hiển thị)" stroke="#8b5cf6" strokeWidth={2} dot={false} />}
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -279,16 +282,16 @@ export default function Dashboard() {
                 </div>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analyticsSeries}>
+                    {engagementSeries.length === 0 ? <div className="h-full flex items-center justify-center text-sm text-gray-400">Chưa có dữ liệu tương tác thật</div> : <BarChart data={analyticsSeries} barCategoryGap="18%" barGap={4}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => fmt(v)} />
                       <Tooltip formatter={(v: any) => formatMetricValue(v)} />
                       <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      <Bar dataKey="likes" name="Likes" fill="#ec4899" radius={[3, 3, 0, 0]} barSize={18} />
-                      <Bar dataKey="comments" name="Comments" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={18} />
-                      <Bar dataKey="shares" name="Shares" fill="#10b981" radius={[3, 3, 0, 0]} barSize={18} />
-                    </BarChart>
+                      {engagementSeries.includes('likes') && <Bar dataKey="likes" name="Likes" fill="#ec4899" radius={[3, 3, 0, 0]} barSize={18} />}
+                      {engagementSeries.includes('comments') && <Bar dataKey="comments" name="Comments" fill="#f59e0b" radius={[3, 3, 0, 0]} barSize={18} />}
+                      {engagementSeries.includes('shares') && <Bar dataKey="shares" name="Shares" fill="#10b981" radius={[3, 3, 0, 0]} barSize={18} />}
+                    </BarChart>}
                   </ResponsiveContainer>
                 </div>
               </div>

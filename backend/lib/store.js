@@ -29,6 +29,9 @@ async function listAssets({ platform, type, status, search, limit = 100, offset 
   params.push(offset); const off = `$${params.length}`;
   const sql = `
     SELECT a.*, a.content, m.reach, m.impressions, m.likes, m.comments, m.shares, m.views,
+           m.viewers, m.engagements, m.net_followers AS "netFollowers", m.watch_time_seconds AS "watchTimeSeconds",
+           m.average_watch_time_seconds AS "averageWatchTimeSeconds", m.views_3_seconds AS "views3Seconds", m.views_60_seconds AS "views60Seconds",
+           m.status AS "metricsStatus", m.metric_group AS "metricGroup",
            m.metrics_available AS "metricsAvailable", m.metrics_partial AS "metricsPartial", m.metrics_error AS "metricsError",
            m.source AS "metricsSource", m.recorded_at AS "metricsRecordedAt",
            m.completion_rate AS "completionRate",
@@ -54,12 +57,17 @@ async function getAsset(id) {
       a.completion_rate AS "completionRate"
     FROM asset a WHERE a.id = $1`, [id]);
   if (!rows[0]) return null;
-  const metrics = await q(`SELECT reach, impressions, likes, comments, shares, views,
+  const metrics = await q(`SELECT reach, impressions, likes, comments, shares, views, viewers, engagements,
+    net_followers AS "netFollowers", watch_time_seconds AS "watchTimeSeconds",
+    average_watch_time_seconds AS "averageWatchTimeSeconds", views_3_seconds AS "views3Seconds", views_60_seconds AS "views60Seconds",
+    status AS "metricsStatus", metric_group AS "metricGroup",
     metrics_available AS "metricsAvailable", metrics_partial AS "metricsPartial", metrics_error AS "metricsError",
     source AS "metricsSource",
     completion_rate AS "completionRate", recorded_at AS "recordedAt"
     FROM metrics WHERE asset_id = $1 ORDER BY recorded_at DESC LIMIT 1`, [id]);
-  const history = await q(`SELECT to_char(recorded_at,'YYYY-MM-DD') AS date, reach, impressions, likes, comments, shares
+  const history = await q(`SELECT to_char(recorded_at,'YYYY-MM-DD') AS date, reach, impressions, likes, comments, shares,
+    views, viewers, engagements, net_followers AS "netFollowers", watch_time_seconds AS "watchTimeSeconds",
+    average_watch_time_seconds AS "averageWatchTimeSeconds", views_3_seconds AS "views3Seconds", views_60_seconds AS "views60Seconds"
     FROM metrics WHERE asset_id = $1 ORDER BY recorded_at ASC`, [id]);
   return { ...rows[0], metrics: metrics.rows[0] || null, history: history.rows };
 }
@@ -87,7 +95,9 @@ async function listPosts({ platform, status, from, to, search, limit = 200 }) {
   const sql = `
     SELECT a.id, a.platform, a.type, a.title, a.content, a.status, a.published_at AS "publishedAt",
            a.is_flagged AS "isFlagged", a.thumbnail_url AS "thumbnailUrl",
-           m.reach, m.impressions, m.likes, m.comments, m.shares, m.views,
+           m.reach, m.impressions, m.likes, m.comments, m.shares, m.views, m.viewers, m.engagements,
+           m.net_followers AS "netFollowers", m.watch_time_seconds AS "watchTimeSeconds",
+           m.average_watch_time_seconds AS "averageWatchTimeSeconds", m.views_3_seconds AS "views3Seconds", m.views_60_seconds AS "views60Seconds",
            m.metrics_available AS "metricsAvailable", m.metrics_partial AS "metricsPartial", m.metrics_error AS "metricsError",
            m.source AS "metricsSource", m.recorded_at AS "metricsRecordedAt"
     FROM asset a
@@ -152,7 +162,10 @@ async function analytics({ days = 7, platform }) {
     SELECT to_char(m.recorded_at AT TIME ZONE 'UTC','YYYY-MM-DD') AS date,
            SUM(m.reach) AS reach, SUM(m.impressions) AS impressions,
            SUM(m.likes) AS likes, SUM(m.comments) AS comments,
-           SUM(m.shares) AS shares
+           SUM(m.shares) AS shares, SUM(m.views) AS views, SUM(m.viewers) AS viewers,
+           SUM(m.engagements) AS engagements, SUM(m.net_followers) AS "netFollowers",
+           SUM(m.watch_time_seconds) AS "watchTimeSeconds", SUM(m.views_3_seconds) AS "views3Seconds",
+           SUM(m.views_60_seconds) AS "views60Seconds"
     FROM metrics m JOIN asset a ON a.id = m.asset_id
     WHERE m.recorded_at >= now() - ($1 || ' days')::interval
       AND ($2::text IS NULL OR a.platform = $2)
@@ -284,17 +297,21 @@ async function upsertAsset(asset) {
   const assetId = rows && rows[0] ? rows[0].id : null;
   if (assetId && asset.metrics) {
     const m = asset.metrics;
-    const available = m.metricsAvailable ?? [m.reach, m.impressions, m.likes, m.comments, m.shares, m.views]
+    const available = m.metricsAvailable ?? [m.reach, m.impressions, m.likes, m.comments, m.shares, m.views, m.viewers, m.engagements, m.netFollowers,
+      m.watchTimeSeconds, m.averageWatchTimeSeconds, m.views3Seconds, m.views60Seconds]
       .some((v) => v !== null && v !== undefined);
-    if (!available && !m.metricsError) return;
+    // Do not persist an empty/error-only snapshot. Keep the last valid snapshot visible.
+    if (!available) return;
     await q(`
-      INSERT INTO metrics (asset_id, reach, impressions, likes, comments, shares, views,
+      INSERT INTO metrics (asset_id, reach, impressions, likes, comments, shares, views, viewers, engagements, net_followers,
+        watch_time_seconds, average_watch_time_seconds, views_3_seconds, views_60_seconds, status, metric_group,
         metrics_available, metrics_partial, metrics_error, platform_error_code, source, completion_rate, recorded_at)
-      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now()
-      WHERE NOT EXISTS (SELECT 1 FROM metrics WHERE asset_id = $1 AND metrics_available = true AND $8 = false)`,
-      [assetId, m.reach ?? null, m.impressions ?? null, m.likes ?? null, m.comments ?? null,
-        m.shares ?? null, m.views ?? null, available, m.metricsPartial ?? false, m.metricsError ?? null,
-        m.platformErrorCode ?? null, m.source ?? asset.platform, m.completionRate ?? null]);
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, now()`,
+      [assetId, m.reach ?? null, m.impressions ?? null, m.likes ?? null, m.comments ?? null, m.shares ?? null, m.views ?? null,
+        m.viewers ?? null, m.engagements ?? null, m.netFollowers ?? null, m.watchTimeSeconds ?? null,
+        m.averageWatchTimeSeconds ?? null, m.views3Seconds ?? null, m.views60Seconds ?? null, m.status ?? null,
+        m.metricGroup ?? null, available, m.metricsPartial ?? false, m.metricsError ?? null, m.platformErrorCode ?? null,
+        m.source ?? asset.platform, m.completionRate ?? null]);
   }
 }
 

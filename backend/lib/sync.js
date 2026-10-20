@@ -69,18 +69,32 @@ async function runSyncNow() {
           for (const a of assets) {
             metricsAttempted += 1;
             const engagement = await platforms.fetchFacebookPostMetrics(full, a.platformPostId);
-            const insights = await platforms.fetchFacebookPostInsights(full, a.platformPostId);
+            const insights = await platforms.fetchFacebookPostInsights(full, a.platformPostId, a.type);
             const merged = {
               reach: insights.metrics?.reach ?? null,
               impressions: insights.metrics?.impressions ?? null,
+              viewers: insights.metrics?.viewers ?? null,
+              engagements: insights.metrics?.engagements ?? null,
               likes: engagement.metrics?.likes ?? null,
               comments: engagement.metrics?.comments ?? null,
               shares: engagement.metrics?.shares ?? null,
               views: insights.metrics?.views ?? null,
+              watchTimeSeconds: insights.metrics?.watchTimeSeconds ?? null,
+              averageWatchTimeSeconds: insights.metrics?.averageWatchTimeSeconds ?? null,
+              views3Seconds: insights.metrics?.views3Seconds ?? null,
+              views60Seconds: insights.metrics?.views60Seconds ?? null,
               metricsAvailable: Boolean(engagement.ok || insights.ok),
-              metricsPartial: !(engagement.ok && insights.ok),
-              metricsError: [engagement.error?.message, insights.error?.message].filter(Boolean).join(' | ') || null,
-              platformErrorCode: engagement.error?.code || insights.error?.code || null,
+              // `insights.ok` means that at least one insight metric worked;
+              // it does not mean that every requested metric worked. Keep the
+              // partial flag true whenever Meta rejected or failed any probe.
+              metricsPartial: Boolean(
+                insights.metrics?.metricsPartial ||
+                (insights.metrics?.insightErrors || []).length > 0 ||
+                !engagement.ok ||
+                !insights.ok
+              ),
+              metricsError: [engagement.error?.message, insights.metrics?.metricsError].filter(Boolean).join(' | ') || null,
+              platformErrorCode: engagement.error?.code || insights.error?.code || insights.metrics?.insightErrors?.[0]?.code || null,
               source: 'facebook_graph_api',
             };
             if (engagement.ok || insights.ok) {
@@ -91,13 +105,22 @@ async function runSyncNow() {
             }
             if (!engagement.ok) metricErrors.push({ platform: c.platform, postId: a.platformPostId, code: engagement.error?.code || null, reason: 'engagement_failed', message: engagement.error?.message });
             if (!insights.ok) metricErrors.push({ platform: c.platform, postId: a.platformPostId, code: insights.error?.code || null, reason: 'insights_failed', message: insights.error?.message });
-            console.warn(`[sync][facebook][metrics][${a.platformPostId}] engagement=${engagement.ok} insights=${insights.ok}`);
+            for (const insightError of insights.metrics?.insightErrors || []) {
+              metricErrors.push({ platform: c.platform, postId: a.platformPostId, metric: insightError.group, code: insightError.code, reason: insightError.reason, message: insightError.message });
+            }
+            const p = insights.metrics?.probes || {};
+            console.warn(`[sync][facebook][${a.platformPostId}][engagement] likes=${engagement.metrics?.likes != null} comments=${engagement.metrics?.comments != null} shares=${engagement.metrics?.shares != null}`);
+            console.warn(`[sync][facebook][${a.platformPostId}][distribution] reach=${p.post_reach?.ok === true && p.post_reach.returned} impressions=${p.post_impressions?.ok === true && p.post_impressions.returned} viewers=${p.post_impressions_unique?.ok === true && p.post_impressions_unique.returned}`);
+            if (['video', 'reel'].includes(a.type)) console.warn(`[sync][facebook][${a.platformPostId}][video] views=${p.post_video_views?.ok === true && p.post_video_views.returned} watchTime=${p.post_video_view_time?.ok === true && p.post_video_view_time.returned} views3s=${p.post_video_views_3s?.ok === true && p.post_video_views_3s.returned} views60s=${p.post_video_views_60s?.ok === true && p.post_video_views_60s.returned}`);
             await store.upsertAsset({ ...a, platform: c.platform, metrics: merged });
           }
         } else {
           for (const a of assets) {
             const values = a.metrics ? [a.metrics.reach, a.metrics.impressions, a.metrics.likes, a.metrics.comments, a.metrics.shares, a.metrics.views] : [];
             if (values.some((v) => v !== null && v !== undefined)) { syncedMetrics += 1; metricsSucceeded += 1; }
+            if (a.metrics?.metricsError) {
+              metricErrors.push({ platform: c.platform, postId: a.platformPostId, reason: 'metrics_failed', message: a.metrics.metricsError });
+            }
           }
         }
         console.log(`[sync][${c.platform}][metrics] attempted=${metricsAttempted || assets.length} succeeded=${metricsSucceeded} failed=${(metricsAttempted || assets.length) - metricsSucceeded}`);

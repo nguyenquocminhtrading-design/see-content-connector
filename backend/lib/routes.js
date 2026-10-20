@@ -4,7 +4,7 @@ const store = require('./store');
 const sync = require('./sync');
 const platforms = require('./platforms');
 const { cacheMiddleware } = require('./cache');
-const { pool } = require('./db');
+const { pool, dbStatus } = require('./db');
 
 const router = express.Router();
 
@@ -13,6 +13,7 @@ router.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     mode: store.demoMode() ? 'demo' : 'postgresql',
+    database: dbStatus(),
     cache: require('./cache').cacheMode(),
     sync: sync.status(),
     uptime: Math.round(process.uptime()),
@@ -260,6 +261,60 @@ router.get('/debug/facebook-pipeline', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Safe platform diagnostics. Enabled only outside production unless explicitly allowed.
+router.get('/debug/platform/:platform', async (req, res, next) => {
+  try {
+    const { platform } = req.params;
+    if (!['linkedin', 'tiktok'].includes(platform)) return res.status(400).json({ error: 'Supported platforms: linkedin, tiktok' });
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEBUG_ENDPOINTS !== 'true') {
+      return res.status(404).json({ error: 'Platform debug is disabled in production' });
+    }
+    const connection = await store.getConnection(platform);
+    const probe = connection?.access_token ? await platforms.testConnectionLive(platform, connection.access_token) : { ok: false, reason: 'missing_token' };
+    const storage = await store.debugStorage(platform);
+    res.json({
+      generatedAt: new Date().toISOString(),
+      platform,
+      mode: store.demoMode() ? 'demo' : 'postgresql',
+      database: dbStatus(),
+      connection: connection ? {
+        status: connection.status,
+        hasToken: Boolean(connection.access_token),
+        tokenFingerprint: connection.access_token ? platforms.tokenFingerprint(connection.access_token) : null,
+        expiresAt: connection.token_expires_at || connection.tokenExpiresAt || null,
+      } : null,
+      probe,
+      storage,
+    });
+  } catch (e) { next(e); }
+});
+
+router.get('/debug/assets/:assetId/metrics', async (req, res, next) => {
+  try {
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEBUG_ENDPOINTS !== 'true') {
+      return res.status(404).json({ error: 'Asset metrics debug is disabled in production' });
+    }
+    const asset = await store.getAsset(req.params.assetId);
+    if (!asset) return res.status(404).json({ error: 'Asset not found' });
+    const connection = await store.getConnection(asset.platform);
+    if (!connection?.access_token) return res.status(400).json({ error: 'Connection token is missing' });
+    const result = { assetId: asset.id, platform: asset.platform, postId: asset.platformPostId, probes: {}, storedMetrics: asset.metrics || null, tokenFingerprint: platforms.tokenFingerprint(connection.access_token) };
+    if (asset.platform === 'facebook') {
+      const engagement = await platforms.fetchFacebookPostMetrics(connection, asset.platformPostId);
+      const insights = await platforms.fetchFacebookPostInsights(connection, asset.platformPostId, asset.type);
+      result.probes = {
+        engagement: { ok: engagement.ok, returned: engagement.metrics ? ['likes', 'comments', 'shares'].filter((key) => engagement.metrics[key] !== null) : [], error: engagement.error || null },
+        distribution: { ok: Boolean(Object.keys(insights.metrics?.probes || {}).some((x) => /impressions|reach|engaged/.test(x) && insights.metrics.probes[x].returned)), returned: insights.metrics?.probes || {}, errors: (insights.metrics?.insightErrors || []).filter((e) => /impressions|reach|engaged/.test(e.metric)) },
+        video: { ok: Boolean(Object.keys(insights.metrics?.probes || {}).some((x) => x.includes('video') && insights.metrics.probes[x].returned)), returned: insights.metrics?.probes || {}, errors: (insights.metrics?.insightErrors || []).filter((e) => e.metric?.includes('video')) },
+      };
+    } else {
+      const test = await platforms.testConnectionLive(asset.platform, connection.access_token);
+      result.probes = { connection: test };
+    }
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
 router.delete('/connections/:id', async (req, res, next) => {
   try {
     const ok = await store.deleteConnection(req.params.id);
@@ -301,13 +356,15 @@ router.get('/auth/:platform/callback', async (req, res) => {
     if (req.query.error_description) throw new Error(req.query.error_description);
     const token = await platforms.exchangeCode(platform, req.query.code);
     const expiresAt = token.expires_in ? new Date(Date.now() + token.expires_in * 1000).toISOString() : null;
+    const test = await platforms.testConnectionLive(platform, token.access_token);
     await store.upsertConnection({
       platform,
       accessToken: token.access_token,
       refreshToken: token.refresh_token || null,
       expiresAt,
-      status: 'connected',
+      status: test.ok ? 'connected' : (test.reason === 'expired' ? 'expired' : 'error'),
     });
+    if (!test.ok) throw new Error(test.message || `Kết nối ${platform} chưa vượt qua kiểm tra API`);
     res.redirect(`${frontend}/connections?connected=${platform}`);
   } catch (e) {
     res.redirect(`${frontend}/connections?error=${encodeURIComponent(e.message)}`);

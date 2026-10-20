@@ -1,5 +1,4 @@
-// PostgreSQL layer. If the DB is unreachable the API keeps running in DEMO mode
-// (in-memory data) so the project can be verified end-to-end with zero setup.
+// PostgreSQL layer. Demo mode is opt-in for local development only.
 const { Pool } = require('pg');
 
 const poolConfig = process.env.DATABASE_URL
@@ -22,6 +21,7 @@ const poolConfig = process.env.DATABASE_URL
 const pool = new Pool(poolConfig);
 
 let dbReady = false;
+let dbError = null;
 
 const SCHEMA = `
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS metrics (
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_asset ON metrics (asset_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_metrics_asset_recorded_desc ON metrics (asset_id, recorded_at DESC);
 
 ALTER TABLE metrics ALTER COLUMN reach DROP NOT NULL;
 ALTER TABLE metrics ALTER COLUMN impressions DROP NOT NULL;
@@ -94,6 +95,15 @@ ALTER TABLE metrics ADD COLUMN IF NOT EXISTS metrics_error TEXT;
 ALTER TABLE metrics ADD COLUMN IF NOT EXISTS metrics_partial BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE metrics ADD COLUMN IF NOT EXISTS source TEXT;
 ALTER TABLE metrics ADD COLUMN IF NOT EXISTS platform_error_code TEXT;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS viewers INTEGER;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS engagements INTEGER;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS net_followers INTEGER;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS watch_time_seconds BIGINT;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS average_watch_time_seconds REAL;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS views_3_seconds INTEGER;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS views_60_seconds INTEGER;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS status TEXT;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS metric_group TEXT;
 
 UPDATE metrics SET metrics_available = true
 WHERE metrics_available = false
@@ -137,15 +147,32 @@ async function ensureEnvConnections() {
 }
 
 async function initDatabase() {
+  const allowDemo = process.env.NODE_ENV !== 'production' && process.env.ALLOW_DEMO_MODE === 'true';
+  if (!process.env.DATABASE_URL && !allowDemo) {
+    dbReady = false;
+    dbError = 'DATABASE_URL is not configured';
+    console.error('[db] DATABASE_URL missing. Configure PostgreSQL or explicitly set ALLOW_DEMO_MODE=true for local demo mode.');
+    throw new Error(dbError);
+  }
+  if (!process.env.DATABASE_URL && allowDemo) {
+    console.warn('[db] DATABASE_URL missing — running in DEMO mode (ALLOW_DEMO_MODE=true).');
+    return false;
+  }
   try {
     await pool.query('SELECT 1');
     await pool.query(SCHEMA);
     dbReady = true;
+    dbError = null;
     console.log('[db] PostgreSQL connected — schema ready');
     await ensureEnvConnections();
   } catch (err) {
     dbReady = false;
-    console.warn('[db] PostgreSQL unavailable — running in DEMO mode (in-memory data):', err.message);
+    dbError = err.message;
+    if (!allowDemo) {
+      console.error('[db] PostgreSQL unavailable and demo mode is disabled:', err.message);
+      throw new Error(`PostgreSQL unavailable: ${err.message}`);
+    }
+    console.warn('[db] PostgreSQL unavailable — running in DEMO mode (ALLOW_DEMO_MODE=true):', err.message);
   }
   return dbReady;
 }
@@ -154,9 +181,17 @@ function isDbReady() {
   return dbReady;
 }
 
+function dbStatus() {
+  return {
+    configured: Boolean(process.env.DATABASE_URL),
+    connected: dbReady,
+    error: dbReady ? null : dbError,
+  };
+}
+
 async function q(text, params) {
   return pool.query(text, params);
 }
 
-module.exports = { pool, initDatabase, isDbReady, q, ensureEnvConnections };
+module.exports = { pool, initDatabase, isDbReady, dbStatus, q, ensureEnvConnections };
 

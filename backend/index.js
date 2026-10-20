@@ -1,5 +1,5 @@
 // Entry point — SEE Content Connector backend.
-// Boots Express, initializes PostgreSQL (falls back to DEMO mode), Redis cache
+// Boots Express, initializes PostgreSQL (demo mode is explicit local-only), Redis cache
 // (falls back to in-memory), mounts all API routes and the cron sync worker.
 const path = require('path');
 
@@ -35,7 +35,13 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 });
 
 async function boot() {
-  await initDatabase();
+  try {
+    await initDatabase();
+  } catch (err) {
+    console.error(`[boot] ${err.message}`);
+    process.exitCode = 1;
+    return;
+  }
   await initCache();
   // Start background sync worker
   startSyncWorker();
@@ -45,6 +51,9 @@ async function boot() {
     console.log('  SEE Content Connector backend');
     console.log(`  http://localhost:${PORT}/api/health`);
     console.log(`  mode: ${mode}`);
+    console.log(`  databaseConfigured: ${Boolean(process.env.DATABASE_URL)}`);
+    console.log(`  linkedinConfigured: ${Boolean(process.env.LINKEDIN_CLIENT_ID && process.env.LINKEDIN_CLIENT_SECRET)}`);
+    console.log(`  tiktokConfigured: ${Boolean(process.env.TIKTOK_CLIENT_KEY && process.env.TIKTOK_CLIENT_SECRET)}`);
     console.log('==============================================');
   });
 }
