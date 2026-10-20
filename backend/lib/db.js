@@ -89,12 +89,39 @@ CREATE TABLE IF NOT EXISTS alert (
 );
 `;
 
+async function ensureEnvConnections() {
+  try {
+    const metaToken = process.env.META_PAGE_ACCESS_TOKEN;
+    if (metaToken && !metaToken.startsWith('your_') && metaToken.trim()) {
+      await pool.query(`
+        INSERT INTO platform_connection (platform, access_token, status)
+        VALUES ('facebook', $1, 'connected')
+        ON CONFLICT (platform) DO UPDATE SET
+          access_token = COALESCE(EXCLUDED.access_token, platform_connection.access_token),
+          status = 'connected'`,
+        [metaToken.trim()]
+      );
+      await pool.query(`
+        INSERT INTO platform_connection (platform, access_token, status)
+        VALUES ('instagram', $1, 'connected')
+        ON CONFLICT (platform) DO UPDATE SET
+          access_token = COALESCE(EXCLUDED.access_token, platform_connection.access_token),
+          status = 'connected'`,
+        [metaToken.trim()]
+      );
+    }
+  } catch (err) {
+    console.warn('[db] ensureEnvConnections error:', err.message);
+  }
+}
+
 async function initDatabase() {
   try {
     await pool.query('SELECT 1');
     await pool.query(SCHEMA);
     dbReady = true;
     console.log('[db] PostgreSQL connected — schema ready');
+    await ensureEnvConnections();
   } catch (err) {
     dbReady = false;
     console.warn('[db] PostgreSQL unavailable — running in DEMO mode (in-memory data):', err.message);
@@ -110,4 +137,5 @@ async function q(text, params) {
   return pool.query(text, params);
 }
 
-module.exports = { pool, initDatabase, isDbReady, q };
+module.exports = { pool, initDatabase, isDbReady, q, ensureEnvConnections };
+

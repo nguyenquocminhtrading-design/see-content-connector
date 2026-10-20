@@ -1,6 +1,6 @@
 // Data-access layer: every route talks to this module. Each function branches
 // between PostgreSQL (real mode) and the in-memory demo dataset (demo mode).
-const { isDbReady, q } = require('./db');
+const { isDbReady, q, ensureEnvConnections } = require('./db');
 const demo = require('./demo');
 
 function demoMode() {
@@ -260,15 +260,25 @@ async function upsertAsset(asset) {
     demo.upsertAssetDemo(asset);
     return;
   }
-  await q(`
+  const { rows } = await q(`
     INSERT INTO asset (connection_id, platform, platform_post_id, type, title, thumbnail_url, status, published_at, synced_at)
     VALUES ((SELECT id FROM platform_connection WHERE platform = $1), $1, $2, $3, $4, $5, $6, $7, now())
     ON CONFLICT (platform, platform_post_id) DO UPDATE SET
       title = EXCLUDED.title,
       thumbnail_url = COALESCE(EXCLUDED.thumbnail_url, asset.thumbnail_url),
       status = EXCLUDED.status,
-      synced_at = now()`,
+      synced_at = now()
+    RETURNING id`,
     [asset.platform, asset.platformPostId, asset.type, asset.title, asset.thumbnailUrl, asset.status, asset.publishedAt]);
+
+  const assetId = rows && rows[0] ? rows[0].id : null;
+  if (assetId && asset.metrics) {
+    const m = asset.metrics;
+    await q(`
+      INSERT INTO metrics (asset_id, reach, impressions, likes, comments, shares, completion_rate, recorded_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+      [assetId, m.reach || 0, m.impressions || 0, m.likes || 0, m.comments || 0, m.shares || 0, m.completionRate || null]);
+  }
 }
 
 async function listConnections() {
@@ -282,8 +292,8 @@ async function listConnections() {
         status: isConnected ? 'connected' : c.status,
       };
     });
-  }
-  const { rows } = await q(`SELECT id, platform, status,
+  await ensureEnvConnections();
+  let { rows } = await q(`SELECT id, platform, status,
       token_expires_at AS "tokenExpiresAt", created_at AS "createdAt",
       (access_token IS NOT NULL) AS "hasToken"
     FROM platform_connection ORDER BY created_at DESC`);
@@ -318,7 +328,13 @@ async function getConnection(platform) {
     let token = c.access_token || (platform === 'facebook' || platform === 'instagram' ? process.env.META_PAGE_ACCESS_TOKEN : null);
     return { ...c, access_token: token };
   }
-  const { rows } = await q(`SELECT * FROM platform_connection WHERE platform = $1`, [platform]);
+  let { rows } = await q(`SELECT * FROM platform_connection WHERE platform = $1`, [platform]);
+  if ((!rows[0] || !rows[0].access_token) && (platform === 'facebook' || platform === 'instagram') && process.env.META_PAGE_ACCESS_TOKEN) {
+    await ensureEnvConnections();
+    const refreshed = await q(`SELECT * FROM platform_connection WHERE platform = $1`, [platform]);
+    if (refreshed.rows[0]) return refreshed.rows[0];
+    return { platform, access_token: process.env.META_PAGE_ACCESS_TOKEN, status: 'connected' };
+  }
   return rows[0] || null;
 }
 
