@@ -5,6 +5,7 @@ const sync = require('./sync');
 const platforms = require('./platforms');
 const { cacheMiddleware } = require('./cache');
 const { pool, dbStatus } = require('./db');
+const { importBusinessSuiteFolder } = require('./businessSuiteImport');
 
 const router = express.Router();
 
@@ -374,6 +375,58 @@ router.get('/auth/:platform/callback', async (req, res) => {
 /* ---------- manual sync + export (Phase 2/3) ---------- */
 router.all('/sync/run', async (req, res, next) => {
   try { res.json({ result: await sync.runSyncNow() }); } catch (e) { next(e); }
+});
+
+/* ---------- Meta Business Suite import ---------- */
+router.post('/import/meta-business-suite', async (req, res, next) => {
+  try {
+    const expectedSecret = process.env.META_BUSINESS_SUITE_IMPORT_SECRET;
+    if (!expectedSecret || req.get('x-import-secret') !== expectedSecret) {
+      return res.status(401).json({ ok: false, error: 'Invalid import secret' });
+    }
+    const { pageId, source, rows } = req.body || {};
+    if (String(pageId || '') !== String(process.env.META_PAGE_ID || '')) {
+      return res.status(400).json({ ok: false, error: 'Invalid pageId' });
+    }
+    if (source !== 'meta_business_suite_scraper' || !Array.isArray(rows)) {
+      return res.status(400).json({ ok: false, error: 'Invalid import payload' });
+    }
+    const metricKeys = ['reach', 'impressions', 'likes', 'comments', 'shares', 'views', 'viewers', 'engagements', 'netFollowers', 'watchTimeSeconds', 'averageWatchTimeSeconds', 'views3Seconds', 'views60Seconds'];
+    const errors = [];
+    let imported = 0;
+    let matched = 0;
+    for (const [index, row] of rows.entries()) {
+      const postId = String(row?.platformPostId || '').trim();
+      if (!postId) { errors.push({ index, reason: 'missing_platform_post_id' }); continue; }
+      const metrics = {};
+      let hasValue = false;
+      let invalid = false;
+      for (const key of metricKeys) {
+        if (row[key] === null || row[key] === undefined || row[key] === '' || row[key] === '--' || row[key] === 'N/A') {
+          metrics[key] = null;
+          continue;
+        }
+        const value = Number(row[key]);
+        if (!Number.isFinite(value) || value < 0) { errors.push({ index, postId, field: key, reason: 'invalid_non_negative_number' }); invalid = true; break; }
+        metrics[key] = value;
+        hasValue = true;
+      }
+      if (invalid || !hasValue) continue;
+      const result = await store.importBusinessSuiteMetrics({ platformPostId: postId, metrics, recordedAt: row.recordedAt });
+      if (result.matched) { imported += 1; matched += 1; } else errors.push({ index, postId, reason: 'asset_not_found' });
+    }
+    res.json({ ok: errors.length === 0, imported, matched, unmatched: rows.length - matched, errors });
+  } catch (e) { next(e); }
+});
+
+router.post('/import/meta-business-suite-folder', async (req, res, next) => {
+  try {
+    const expectedSecret = process.env.META_BUSINESS_SUITE_IMPORT_SECRET;
+    if (!expectedSecret || req.get('x-import-secret') !== expectedSecret) {
+      return res.status(401).json({ ok: false, error: 'Invalid import secret' });
+    }
+    res.json(await importBusinessSuiteFolder({ directory: req.body?.directory }));
+  } catch (e) { next(e); }
 });
 
 router.get('/export/report.csv', async (req, res, next) => {

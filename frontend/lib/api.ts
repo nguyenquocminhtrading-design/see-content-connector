@@ -73,6 +73,19 @@ export function getAvailableSeries<T extends Record<string, any>>(rows: T[], key
   return keys.filter((key) => rows.some((row) => hasMetricValue(row?.[key])));
 }
 
+export function formatDuration(seconds: number | string | null | undefined): string {
+  if (!hasMetricValue(seconds)) return 'N/A';
+  const value = Number(seconds);
+  if (!Number.isFinite(value)) return 'N/A';
+  if (value === 0) return '0 giây';
+  const total = Math.round(value);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return [hours ? `${hours} giờ` : '', minutes ? `${minutes} phút` : '', secs ? `${secs} giây` : '']
+    .filter(Boolean).join(' ');
+}
+
 export function formatMetricValue(value: number | string | null | undefined, pending = false): string {
   if (pending) return '—';
   if (value === null || value === undefined || value === '') return 'N/A';

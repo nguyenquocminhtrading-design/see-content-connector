@@ -39,7 +39,8 @@ async function listAssets({ platform, type, status, search, limit = 100, offset 
            a.platform_post_id AS "platformPostId", a.thumbnail_url AS "thumbnailUrl", a.is_flagged AS "isFlagged"
     FROM asset a
     LEFT JOIN LATERAL (
-      SELECT * FROM metrics WHERE asset_id = a.id ORDER BY recorded_at DESC LIMIT 1
+      SELECT * FROM metrics WHERE asset_id = a.id
+      ORDER BY CASE WHEN source = 'meta_business_suite_scraper' THEN 0 ELSE 1 END, recorded_at DESC LIMIT 1
     ) m ON true
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY COALESCE(a.published_at, a.synced_at) DESC
@@ -64,7 +65,8 @@ async function getAsset(id) {
     metrics_available AS "metricsAvailable", metrics_partial AS "metricsPartial", metrics_error AS "metricsError",
     source AS "metricsSource",
     completion_rate AS "completionRate", recorded_at AS "recordedAt"
-    FROM metrics WHERE asset_id = $1 ORDER BY recorded_at DESC LIMIT 1`, [id]);
+    FROM metrics WHERE asset_id = $1
+    ORDER BY CASE WHEN source = 'meta_business_suite_scraper' THEN 0 ELSE 1 END, recorded_at DESC LIMIT 1`, [id]);
   const history = await q(`SELECT to_char(recorded_at,'YYYY-MM-DD') AS date, reach, impressions, likes, comments, shares,
     views, viewers, engagements, net_followers AS "netFollowers", watch_time_seconds AS "watchTimeSeconds",
     average_watch_time_seconds AS "averageWatchTimeSeconds", views_3_seconds AS "views3Seconds", views_60_seconds AS "views60Seconds"
@@ -101,7 +103,8 @@ async function listPosts({ platform, status, from, to, search, limit = 200 }) {
            m.metrics_available AS "metricsAvailable", m.metrics_partial AS "metricsPartial", m.metrics_error AS "metricsError",
            m.source AS "metricsSource", m.recorded_at AS "metricsRecordedAt"
     FROM asset a
-    LEFT JOIN LATERAL (SELECT * FROM metrics WHERE asset_id = a.id ORDER BY recorded_at DESC LIMIT 1) m ON true
+    LEFT JOIN LATERAL (SELECT * FROM metrics WHERE asset_id = a.id
+      ORDER BY CASE WHEN source = 'meta_business_suite_scraper' THEN 0 ELSE 1 END, recorded_at DESC LIMIT 1) m ON true
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY a.published_at DESC NULLS LAST LIMIT $${params.length}`;
   const { rows } = await q(sql, params);
@@ -207,7 +210,8 @@ async function compareAnalytics({ days = 30 }) {
            SUM(m.likes) AS likes, SUM(m.comments) AS comments,
            SUM(m.shares) AS shares
     FROM asset a
-    LEFT JOIN LATERAL (SELECT * FROM metrics WHERE asset_id = a.id ORDER BY recorded_at DESC LIMIT 1) m ON true
+    LEFT JOIN LATERAL (SELECT * FROM metrics WHERE asset_id = a.id
+      ORDER BY CASE WHEN source = 'meta_business_suite_scraper' THEN 0 ELSE 1 END, recorded_at DESC LIMIT 1) m ON true
     WHERE a.published_at >= now() - ($1 || ' days')::interval
     GROUP BY a.platform`, [String(days)]);
   const conns = await listConnections();
@@ -313,6 +317,32 @@ async function upsertAsset(asset) {
         m.metricGroup ?? null, available, m.metricsPartial ?? false, m.metricsError ?? null, m.platformErrorCode ?? null,
         m.source ?? asset.platform, m.completionRate ?? null]);
   }
+}
+
+async function findAssetByPlatformPostId(platform, platformPostId) {
+  if (demoMode()) return null;
+  const { rows } = await q('SELECT id, platform, platform_post_id AS "platformPostId" FROM asset WHERE platform = $1 AND platform_post_id = $2 LIMIT 1', [platform, platformPostId]);
+  return rows[0] || null;
+}
+
+async function importBusinessSuiteMetrics({ platformPostId, metrics, recordedAt }) {
+  if (demoMode()) throw new Error('Business Suite import requires PostgreSQL mode');
+  const asset = await findAssetByPlatformPostId('facebook', platformPostId);
+  if (!asset) return { matched: false };
+  const values = [
+    asset.id, metrics.reach ?? null, metrics.impressions ?? null, metrics.likes ?? null,
+    metrics.comments ?? null, metrics.shares ?? null, metrics.views ?? null, metrics.viewers ?? null,
+    metrics.engagements ?? null, metrics.netFollowers ?? null, metrics.watchTimeSeconds ?? null,
+    metrics.averageWatchTimeSeconds ?? null, metrics.views3Seconds ?? null, metrics.views60Seconds ?? null,
+    true, metrics.metricsPartial ?? false, metrics.metricsError ?? null, 'meta_business_suite_scraper',
+    recordedAt || new Date().toISOString(), 'business_suite'
+  ];
+  await q(`INSERT INTO metrics
+    (asset_id, reach, impressions, likes, comments, shares, views, viewers, engagements, net_followers,
+     watch_time_seconds, average_watch_time_seconds, views_3_seconds, views_60_seconds,
+     metrics_available, metrics_partial, metrics_error, source, recorded_at, metric_group)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`, values);
+  return { matched: true, assetId: asset.id };
 }
 
 async function listConnections() {
@@ -439,4 +469,6 @@ module.exports = {
   listConnections, upsertConnection, getConnection, debugStorage, deleteConnection,
   upsertAsset,
   exportRows,
+  findAssetByPlatformPostId,
+  importBusinessSuiteMetrics,
 };

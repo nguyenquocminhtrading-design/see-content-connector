@@ -19,6 +19,8 @@ frontend/out/
 .env.*.local
 backend/.env
 frontend/.env
+tools/meta-business-suite-scraper/.profile/
+tools/meta-business-suite-scraper/output.json
 
 # Logs
 *.log

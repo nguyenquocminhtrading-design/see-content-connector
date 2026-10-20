@@ -1,0 +1,11 @@
+{
+  "name": "see-meta-business-suite-scraper",
+  "private": true,
+  "scripts": {
+    "login": "node scraper.js login",
+    "scrape": "node scraper.js scrape"
+  },
+  "dependencies": {
+    "playwright": "^1.52.0"
+  }
+}

@@ -5,6 +5,7 @@ const cron = require('node-cron');
 const store = require('./store');
 const platforms = require('./platforms');
 const { isDbReady } = require('./db');
+const { importBusinessSuiteFolder } = require('./businessSuiteImport');
 
 let lastRun = null;
 let lastResult = null;
@@ -22,6 +23,16 @@ async function runSyncNow() {
     let syncedMetrics = 0;
     const metricErrors = [];
     const errors = [];
+    let businessSuiteImport = null;
+    try {
+      businessSuiteImport = await importBusinessSuiteFolder();
+      if (!businessSuiteImport.skipped && businessSuiteImport.files?.length) {
+        console.log(`[sync][business-suite] files=${businessSuiteImport.files.length} matched=${businessSuiteImport.matched} errors=${businessSuiteImport.errors.length}`);
+      }
+    } catch (error) {
+      businessSuiteImport = { ok: false, errors: [{ reason: error.message }] };
+      console.warn(`[sync][business-suite] import failed: ${error.message}`);
+    }
 
     for (const c of connections) {
       if (!c.hasToken) continue;
@@ -151,7 +162,7 @@ async function runSyncNow() {
       }
     }
 
-    lastResult = { mode: isDbReady() ? 'postgresql' : 'demo', ok: errors.length === 0, synced, syncedAssets: synced, syncedMetrics, metricErrors, errors, at: lastRun };
+    lastResult = { mode: isDbReady() ? 'postgresql' : 'demo', ok: errors.length === 0, synced, syncedAssets: synced, syncedMetrics, metricErrors, errors, businessSuiteImport, at: lastRun };
     console.log(`[sync] done (${isDbReady() ? 'postgresql' : 'demo'}) — synced ${synced} assets, ${errors.length} errors`);
     return lastResult;
   } catch (err) {
