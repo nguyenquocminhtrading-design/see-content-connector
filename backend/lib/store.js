@@ -292,6 +292,7 @@ async function listConnections() {
         status: isConnected ? 'connected' : c.status,
       };
     });
+  }
   await ensureEnvConnections();
   let { rows } = await q(`SELECT id, platform, status,
       token_expires_at AS "tokenExpiresAt", created_at AS "createdAt",
