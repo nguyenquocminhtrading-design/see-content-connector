@@ -76,11 +76,13 @@ async function runSyncNow() {
           status,
         });
         await store.createAlert({
-          type: isExpired ? 'token_expired' : 'sync_error',
+          type: isExpired ? 'token_expired' : (e.message.includes('pages_read_engagement') || e.message.includes('Page Public Content Access') || e.message.includes('(#10)') ? 'facebook_permission_error' : 'sync_error'),
           severity: 'high',
           message: isExpired
             ? `Phiên làm việc của ${c.platform} đã hết hạn. Vui lòng bấm Cập nhật Token trong mục Connections. Dữ liệu cũ vẫn được bảo lưu an toàn.`
-            : `Đồng bộ ${c.platform} gặp lỗi: ${e.message}`,
+            : (c.platform === 'facebook' && (e.message.includes('pages_read_engagement') || e.message.includes('Page Public Content Access') || e.message.includes('(#10)'))
+              ? 'Facebook token chưa có pages_read_engagement hoặc app chưa được cấp Page Public Content Access. Hãy tạo lại Page Access Token sau khi cấp quyền.'
+              : `Đồng bộ ${c.platform} gặp lỗi: ${e.message}`),
         });
       }
     }

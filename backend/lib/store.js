@@ -368,6 +368,27 @@ async function getConnection(platform) {
   return rows[0] || null;
 }
 
+async function debugStorage(platform = 'facebook') {
+  if (demoMode()) return { mode: 'demo', connection: await getConnection(platform), assets: [], metrics: [] };
+  const connection = await q(`SELECT id, platform, status, access_token IS NOT NULL AS "hasToken",
+    md5(access_token) AS "tokenFingerprint", token_expires_at AS "tokenExpiresAt", created_at AS "createdAt"
+    FROM platform_connection WHERE platform = $1`, [platform]);
+  const assets = await q(`SELECT COUNT(*)::int AS total,
+    COUNT(*) FILTER (WHERE platform = $1)::int AS "platformTotal",
+    COUNT(*) FILTER (WHERE title IS NOT NULL AND title <> '')::int AS "withTitle",
+    COUNT(*) FILTER (WHERE title = 'Facebook Post')::int AS "defaultTitle",
+    MAX(synced_at) AS "lastSyncedAt"
+    FROM asset`, [platform]);
+  const samples = await q(`SELECT id, platform, platform_post_id AS "platformPostId", title,
+    published_at AS "publishedAt", synced_at AS "syncedAt"
+    FROM asset WHERE platform = $1 ORDER BY synced_at DESC LIMIT 5`, [platform]);
+  const metricRows = await q(`SELECT COUNT(*)::int AS total,
+    COUNT(*) FILTER (WHERE metrics_available = true)::int AS "available",
+    MAX(recorded_at) AS "lastRecordedAt"
+    FROM metrics m JOIN asset a ON a.id = m.asset_id WHERE a.platform = $1`, [platform]);
+  return { mode: 'postgresql', connection: connection.rows[0] || null, assets: assets.rows[0], metrics: metricRows.rows[0], samples: samples.rows };
+}
+
 async function deleteConnection(id) {
   if (demoMode()) {
     const list = demo.getDemo().connections;
@@ -393,7 +414,7 @@ module.exports = {
   listAssets, getAsset, listPosts, videoHealth, listThumbnails,
   analytics, compareAnalytics, dashboardSummary,
   listAlerts, createAlert, markAlertRead,
-  listConnections, upsertConnection, getConnection, deleteConnection,
+  listConnections, upsertConnection, getConnection, debugStorage, deleteConnection,
   upsertAsset,
   exportRows,
 };

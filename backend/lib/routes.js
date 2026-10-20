@@ -167,6 +167,37 @@ router.post('/connections/:platform/test', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Safe Meta token diagnostics: never returns the token itself.
+router.get('/connections/facebook/debug-token', async (req, res, next) => {
+  try {
+    const conn = await store.getConnection('facebook');
+    if (!conn?.access_token) return res.status(400).json({ ok: false, error: 'Chưa có Facebook token' });
+    res.json(await platforms.debugMetaToken(conn.access_token, process.env.META_PAGE_ID));
+  } catch (e) { next(e); }
+});
+
+// Pipeline diagnostics: token fingerprint only, DB counts and recent stored assets.
+router.get('/debug/facebook-pipeline', async (req, res, next) => {
+  try {
+    const storage = await store.debugStorage('facebook');
+    const connection = await store.getConnection('facebook');
+    const live = connection?.access_token
+      ? await platforms.testConnectionLive('facebook', connection.access_token)
+      : { ok: false, message: 'No Facebook token in backend connection' };
+    res.json({
+      generatedAt: new Date().toISOString(),
+      backend: { mode: store.demoMode() ? 'demo' : 'postgresql', nodeEnv: process.env.NODE_ENV || null, pageId: process.env.META_PAGE_ID || null },
+      liveMeta: live,
+      storage,
+      frontendChecks: {
+        assetsEndpoint: '/api/assets?platform=facebook&limit=5',
+        postsEndpoint: '/api/posts?platform=facebook&limit=5',
+        note: 'Nếu liveMeta ok nhưng storage.platformTotal = 0 thì lỗi ở sync/DB. Nếu storage có title nhưng UI trống thì kiểm tra frontend proxy/API response.'
+      }
+    });
+  } catch (e) { next(e); }
+});
+
 router.delete('/connections/:id', async (req, res, next) => {
   try {
     const ok = await store.deleteConnection(req.params.id);

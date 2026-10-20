@@ -138,10 +138,19 @@ async function testConnectionLive(platform, token) {
   try {
     if (platform === 'facebook') {
       const pageId = process.env.META_PAGE_ID;
-      const res = await fetch(`${FB_API}/${pageId || 'me'}?fields=id,name&access_token=${token}`);
-      const json = await res.json();
-      if (json.error) return { ok: false, message: json.error.message, code: json.error.code };
-      return { ok: true, name: json.name || json.id, id: json.id };
+      if (!pageId) return { ok: false, message: 'META_PAGE_ID chưa được cấu hình.', reason: 'missing_page_id' };
+      const pageRes = await fetch(`${FB_API}/${pageId}?fields=id,name,access_token&access_token=${token}`);
+      const pageJson = await pageRes.json();
+      if (pageJson.error) return classifyMetaError(pageJson.error, pageId, 'page_lookup', pageRes.status);
+      if (String(pageJson.id) !== String(pageId)) {
+        return { ok: false, message: 'Token không thuộc META_PAGE_ID đã cấu hình.', reason: 'wrong_page', id: pageJson.id };
+      }
+
+      const postsUrl = `${FB_API}/${pageId}/published_posts?fields=id,message,created_time&limit=1&access_token=${token}`;
+      const postsRes = await fetch(postsUrl);
+      const postsJson = await postsRes.json();
+      if (postsJson.error) return classifyMetaError(postsJson.error, pageId, 'published_posts', postsRes.status);
+      return { ok: true, name: pageJson.name || pageJson.id, id: pageJson.id, canReadPublishedPosts: true };
     }
     if (platform === 'instagram') {
       const igId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID;
@@ -173,6 +182,51 @@ async function testConnectionLive(platform, token) {
   } catch (err) {
     return { ok: false, message: err.message };
   }
+}
+
+function classifyMetaError(error, pageId, endpoint, status) {
+  const code = Number(error?.code);
+  const subcode = error?.error_subcode ?? error?.error_sub_code ?? null;
+  let reason = 'meta_api_error';
+  let message = error?.message || `Meta API error (${status})`;
+  if (code === 10 || /pages_read_engagement|Page Public Content Access/i.test(message)) {
+    reason = 'missing_pages_read_engagement_or_public_content_access';
+    message = 'Facebook token chưa có pages_read_engagement hoặc app chưa được cấp Page Public Content Access. Hãy tạo lại Page Access Token sau khi cấp quyền.';
+  } else if (code === 190) {
+    reason = 'expired_or_invalid_token';
+  }
+  console.warn(`[meta] page=${pageId} endpoint=${endpoint} status=${status} code=${code || 'unknown'} subcode=${subcode || 'none'} reason=${reason}`);
+  return { ok: false, message, reason, code: code || null, subcode, endpoint };
+}
+
+async function debugMetaToken(token, pageId = process.env.META_PAGE_ID) {
+  if (!token) return { ok: false, message: 'Chưa có token.' };
+  const c = credentialsFor('facebook');
+  if (!c?.id || !c?.secret) return { ok: false, message: 'META_APP_ID/META_APP_SECRET chưa được cấu hình.' };
+  const appToken = `${c.id}|${c.secret}`;
+  const debugRes = await fetch(`${FB_API}/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(appToken)}`);
+  const debugJson = await debugRes.json();
+  const d = debugJson.data || {};
+  const safe = {
+    isValid: Boolean(d.is_valid),
+    appId: d.app_id || null,
+    type: d.type || null,
+    userId: d.user_id || null,
+    expiresAt: d.expires_at || null,
+    dataAccessExpiresAt: d.data_access_expiration_time || null,
+    scopes: d.granular_scopes || d.scopes || [],
+  };
+  if (debugJson.error) return { ok: false, debug: safe, message: debugJson.error.message };
+  const pageRes = pageId ? await fetch(`${FB_API}/${pageId}?fields=id,name,access_token&access_token=${token}`) : null;
+  const pageJson = pageRes ? await pageRes.json() : null;
+  const postsRes = pageId ? await fetch(`${FB_API}/${pageId}/published_posts?fields=id&limit=1&access_token=${token}`) : null;
+  const postsJson = postsRes ? await postsRes.json() : null;
+  return {
+    ok: safe.isValid && !pageJson?.error && !postsJson?.error,
+    debug: safe,
+    page: pageJson?.error ? classifyMetaError(pageJson.error, pageId, 'page_lookup', pageRes.status) : { id: pageJson?.id, name: pageJson?.name },
+    publishedPosts: postsJson?.error ? classifyMetaError(postsJson.error, pageId, 'published_posts', postsRes.status) : { readable: true, count: (postsJson?.data || []).length },
+  };
 }
 
 // Pull latest posts + insights for a connection. Returns normalized assets.
@@ -343,5 +397,6 @@ module.exports = {
   fetchLatestAssets,
   baseRedirect,
   exchangeForPermanentPageToken,
+  debugMetaToken,
   testConnectionLive,
 };
