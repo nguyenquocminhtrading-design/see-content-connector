@@ -93,22 +93,22 @@ async function ensureEnvConnections() {
   try {
     const metaToken = process.env.META_PAGE_ACCESS_TOKEN;
     if (metaToken && !metaToken.startsWith('your_') && metaToken.trim()) {
-      await pool.query(`
-        INSERT INTO platform_connection (platform, access_token, status)
-        VALUES ('facebook', $1, 'connected')
-        ON CONFLICT (platform) DO UPDATE SET
-          access_token = COALESCE(EXCLUDED.access_token, platform_connection.access_token),
-          status = 'connected'`,
-        [metaToken.trim()]
-      );
-      await pool.query(`
-        INSERT INTO platform_connection (platform, access_token, status)
-        VALUES ('instagram', $1, 'connected')
-        ON CONFLICT (platform) DO UPDATE SET
-          access_token = COALESCE(EXCLUDED.access_token, platform_connection.access_token),
-          status = 'connected'`,
-        [metaToken.trim()]
-      );
+      const token = metaToken.trim();
+      for (const platform of ['facebook', 'instagram']) {
+        const exist = await pool.query('SELECT id, access_token FROM platform_connection WHERE platform = $1', [platform]);
+        if (exist.rows.length === 0) {
+          await pool.query(
+            'INSERT INTO platform_connection (platform, access_token, status) VALUES ($1, $2, $3)',
+            [platform, token, 'connected']
+          );
+        } else if (!exist.rows[0].access_token) {
+          await pool.query(
+            'UPDATE platform_connection SET access_token = $1, status = $2 WHERE platform = $3',
+            [token, 'connected', platform]
+          );
+        }
+      }
+      console.log('[db] Auto-seeded Meta Page token into platform_connection for Facebook & Instagram');
     }
   } catch (err) {
     console.warn('[db] ensureEnvConnections error:', err.message);

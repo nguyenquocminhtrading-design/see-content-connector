@@ -282,6 +282,7 @@ async function upsertAsset(asset) {
 }
 
 async function listConnections() {
+  const defaultPlatforms = ['facebook', 'instagram', 'tiktok', 'linkedin'];
   if (demoMode()) {
     return demo.getDemo().connections.map((c) => {
       const hasMetaToken = (c.platform === 'facebook' || c.platform === 'instagram') && Boolean(process.env.META_PAGE_ACCESS_TOKEN);
@@ -298,6 +299,21 @@ async function listConnections() {
       token_expires_at AS "tokenExpiresAt", created_at AS "createdAt",
       (access_token IS NOT NULL) AS "hasToken"
     FROM platform_connection ORDER BY created_at DESC`);
+
+  const existingPlatforms = new Set(rows.map((r) => r.platform));
+  for (const p of defaultPlatforms) {
+    if (!existingPlatforms.has(p)) {
+      const hasMeta = (p === 'facebook' || p === 'instagram') && Boolean(process.env.META_PAGE_ACCESS_TOKEN);
+      rows.push({
+        id: `c-${p}`,
+        platform: p,
+        status: hasMeta ? 'connected' : 'disconnected',
+        hasToken: hasMeta,
+        tokenExpiresAt: null,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
   return rows;
 }
 

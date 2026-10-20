@@ -222,7 +222,7 @@ router.get('/auth/:platform/callback', async (req, res) => {
 });
 
 /* ---------- manual sync + export (Phase 2/3) ---------- */
-router.post('/sync/run', async (req, res, next) => {
+router.all('/sync/run', async (req, res, next) => {
   try { res.json({ result: await sync.runSyncNow() }); } catch (e) { next(e); }
 });
 
