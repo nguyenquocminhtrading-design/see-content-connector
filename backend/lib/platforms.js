@@ -4,6 +4,11 @@
 // TIKTOK_CLIENT_KEY, LINKEDIN_CLIENT_ID, etc.
 
 const FB_API = 'https://graph.facebook.com/v19.0';
+const crypto = require('crypto');
+
+function tokenFingerprint(token) {
+  return token ? crypto.createHash('sha256').update(token).digest('hex').slice(0, 16) : null;
+}
 
 function baseRedirect(platform) {
   const explicit = {
@@ -40,7 +45,7 @@ function authorizeUrl(platform, state) {
   const redirect = encodeURIComponent(baseRedirect(platform));
   switch (platform) {
     case 'facebook':
-      return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${c.id}&redirect_uri=${redirect}&state=${state}&scope=pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_manage_insights`;
+      return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${c.id}&redirect_uri=${redirect}&state=${state}&scope=pages_show_list,pages_read_engagement,pages_read_user_content,read_insights,pages_manage_posts,pages_manage_metadata,instagram_basic,instagram_manage_insights`;
     case 'instagram':
       return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${c.id}&redirect_uri=${redirect}&state=${state}&scope=instagram_basic,instagram_content_publish,instagram_manage_comments,instagram_manage_insights`;
     case 'linkedin':
@@ -234,7 +239,38 @@ async function debugFacebookMetricsProbe(token, pageId = process.env.META_PAGE_I
       error: json.error ? classifyMetaError(json.error, result.postId, `post_metrics:${probe.name}`, res.status) : null,
     });
   }
-  return { ok: result.assetProbe.ok && result.fields.some((f) => f.ok), ...result };
+  const insightsUrl = `${FB_API}/${encodeURIComponent(result.postId)}/insights?metric=post_impressions,post_reach,post_engaged_users,post_video_views&access_token=${token}`;
+  const insightsRes = await fetch(insightsUrl);
+  const insightsJson = await insightsRes.json();
+  result.insights = {
+    ok: !insightsJson.error,
+    status: insightsRes.status,
+    requestId: insightsRes.headers.get('x-fb-trace-id') || insightsRes.headers.get('x-fb-request-id') || null,
+    returnedMetrics: insightsJson.error ? [] : (insightsJson.data || []).map((item) => item.name),
+    error: insightsJson.error ? classifyMetaError(insightsJson.error, result.postId, 'post_insights', insightsRes.status) : null,
+  };
+  return { ok: result.assetProbe.ok && (result.fields.some((f) => f.ok) || result.insights.ok), ...result };
+}
+
+async function debugFacebookTokenMatrix(tokens, pageId, postId) {
+  const matrix = {};
+  for (const [name, token] of Object.entries(tokens)) {
+    if (!token) {
+      matrix[name] = { configured: false };
+      continue;
+    }
+    const debug = await debugMetaToken(token, pageId);
+    const probe = postId ? await debugFacebookMetricsProbe(token, pageId) : null;
+    matrix[name] = {
+      configured: true,
+      fingerprint: tokenFingerprint(token),
+      debug: debug.debug || null,
+      page: debug.page || null,
+      publishedPosts: debug.publishedPosts || null,
+      probe,
+    };
+  }
+  return { pageId, postId, tokens: matrix };
 }
 
 async function debugMetaToken(token, pageId = process.env.META_PAGE_ID) {
@@ -447,6 +483,26 @@ async function fetchFacebookPostMetrics(connection, postId) {
   }
 }
 
+async function fetchFacebookPostInsights(connection, postId) {
+  const metrics = 'post_impressions,post_reach,post_engaged_users,post_video_views';
+  const url = `${FB_API}/${encodeURIComponent(postId)}/insights?metric=${metrics}&access_token=${connection.access_token}`;
+  try {
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.error) return { ok: false, metrics: null, error: classifyMetaError(json.error, postId, 'post_insights', res.status) };
+    const values = {};
+    for (const item of json.data || []) values[item.name] = item.values?.[0]?.value ?? item.value ?? null;
+    return { ok: true, metrics: {
+      reach: values.post_reach ?? null,
+      impressions: values.post_impressions ?? null,
+      engagedUsers: values.post_engaged_users ?? null,
+      views: values.post_video_views ?? null,
+    } };
+  } catch (err) {
+    return { ok: false, metrics: null, error: { code: null, reason: 'network_error', message: err.message } };
+  }
+}
+
 module.exports = {
   hasCredentials,
   authorizeUrl,
@@ -454,7 +510,10 @@ module.exports = {
   refreshConnection,
   fetchLatestAssets,
   fetchFacebookPostMetrics,
+  fetchFacebookPostInsights,
   debugFacebookMetricsProbe,
+  debugFacebookTokenMatrix,
+  tokenFingerprint,
   baseRedirect,
   exchangeForPermanentPageToken,
   debugMetaToken,

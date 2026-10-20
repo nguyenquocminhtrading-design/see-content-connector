@@ -7,7 +7,7 @@ const PLATFORM_META: Record<string, { connect: string; scopes: string; label: st
   facebook: {
     label: 'Facebook Page',
     connect: '/api/auth/facebook/start',
-    scopes: 'pages_read_engagement, pages_manage_posts, instagram_basic',
+    scopes: 'pages_read_engagement, pages_read_user_content, read_insights, pages_manage_posts, instagram_basic',
     tokenPlaceholder: 'Dán Page Access Token hoặc User Token từ Meta Graph API Explorer...',
   },
   instagram: {

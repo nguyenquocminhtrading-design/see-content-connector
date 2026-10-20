@@ -68,17 +68,31 @@ async function runSyncNow() {
         if (c.platform === 'facebook') {
           for (const a of assets) {
             metricsAttempted += 1;
-            const result = await platforms.fetchFacebookPostMetrics(full, a.platformPostId);
-            if (result.ok) {
-              await store.upsertAsset({ ...a, platform: c.platform, metrics: result.metrics });
+            const engagement = await platforms.fetchFacebookPostMetrics(full, a.platformPostId);
+            const insights = await platforms.fetchFacebookPostInsights(full, a.platformPostId);
+            const merged = {
+              reach: insights.metrics?.reach ?? null,
+              impressions: insights.metrics?.impressions ?? null,
+              likes: engagement.metrics?.likes ?? null,
+              comments: engagement.metrics?.comments ?? null,
+              shares: engagement.metrics?.shares ?? null,
+              views: insights.metrics?.views ?? null,
+              metricsAvailable: Boolean(engagement.ok || insights.ok),
+              metricsPartial: !(engagement.ok && insights.ok),
+              metricsError: [engagement.error?.message, insights.error?.message].filter(Boolean).join(' | ') || null,
+              platformErrorCode: engagement.error?.code || insights.error?.code || null,
+              source: 'facebook_graph_api',
+            };
+            if (engagement.ok || insights.ok) {
               metricsSucceeded += 1;
               syncedMetrics += 1;
             } else {
-              const error = { platform: c.platform, postId: a.platformPostId, code: result.error?.code || null, reason: result.error?.reason || 'metrics_error', message: result.error?.message };
-              metricErrors.push(error);
-              console.warn(`[sync][facebook][metrics][${a.platformPostId}] code=${error.code || 'unknown'} reason=${error.reason}`);
-              await store.upsertAsset({ ...a, platform: c.platform, metrics: { metricsAvailable: false, metricsError: error.message, platformErrorCode: error.code, source: 'facebook' } });
+              metricErrors.push({ platform: c.platform, postId: a.platformPostId, code: merged.platformErrorCode, reason: 'engagement_and_insights_failed', message: merged.metricsError });
             }
+            if (!engagement.ok) metricErrors.push({ platform: c.platform, postId: a.platformPostId, code: engagement.error?.code || null, reason: 'engagement_failed', message: engagement.error?.message });
+            if (!insights.ok) metricErrors.push({ platform: c.platform, postId: a.platformPostId, code: insights.error?.code || null, reason: 'insights_failed', message: insights.error?.message });
+            console.warn(`[sync][facebook][metrics][${a.platformPostId}] engagement=${engagement.ok} insights=${insights.ok}`);
+            await store.upsertAsset({ ...a, platform: c.platform, metrics: merged });
           }
         } else {
           for (const a of assets) {

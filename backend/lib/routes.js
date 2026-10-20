@@ -193,6 +193,36 @@ router.get('/debug/facebook-metrics', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Local-only token comparison. Tokens are read from env/DB and never returned.
+router.get('/debug/facebook-token-matrix', async (req, res, next) => {
+  try {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ error: 'Token matrix is disabled in production' });
+    }
+    const connection = await store.getConnection('facebook');
+    const postId = req.query.postId || '669359189587951_122163353144873587';
+    const matrix = await platforms.debugFacebookTokenMatrix({
+      currentBackendToken: connection?.access_token,
+      shortToken: process.env.META_SHORT_TOKEN,
+      longToken: process.env.META_LONG_TOKEN,
+      pageToken: process.env.META_PAGE_ACCESS_TOKEN,
+    }, process.env.META_PAGE_ID, postId);
+    const storage = await store.debugStorage('facebook');
+    res.json({
+      generatedAt: new Date().toISOString(),
+      page: { id: process.env.META_PAGE_ID || null },
+      matrix,
+      database: {
+        mode: storage.mode,
+        connectionFingerprint: storage.connection?.tokenFingerprint || null,
+        assets: storage.assets,
+        metrics: storage.metrics,
+      },
+      instructions: 'Set META_SHORT_TOKEN and META_LONG_TOKEN locally, then compare the same post and endpoint results. Never commit these variables or return raw tokens.',
+    });
+  } catch (e) { next(e); }
+});
+
 // Pipeline diagnostics: token fingerprint only, DB counts and recent stored assets.
 router.get('/debug/facebook-pipeline', async (req, res, next) => {
   try {
