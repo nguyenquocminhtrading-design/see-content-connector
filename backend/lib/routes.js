@@ -176,6 +176,23 @@ router.get('/connections/facebook/debug-token', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Probes asset access and each post-level metrics field independently.
+router.get('/debug/facebook-metrics', async (req, res, next) => {
+  try {
+    const conn = await store.getConnection('facebook');
+    if (!conn?.access_token) return res.status(400).json({ ok: false, error: 'Chưa có Facebook token' });
+    const token = await platforms.debugMetaToken(conn.access_token, process.env.META_PAGE_ID);
+    const probe = await platforms.debugFacebookMetricsProbe(conn.access_token, process.env.META_PAGE_ID);
+    res.json({
+      generatedAt: new Date().toISOString(),
+      backend: { mode: store.demoMode() ? 'demo' : 'postgresql', pageId: process.env.META_PAGE_ID || null },
+      token: { ok: token.ok, debug: token.debug, page: token.page, publishedPosts: token.publishedPosts },
+      probe,
+      interpretation: 'assetProbe.ok=true nhưng field metrics false nghĩa là app/token đọc được bài viết nhưng Meta đang chặn post-level metrics hoặc feature tương ứng.',
+    });
+  } catch (e) { next(e); }
+});
+
 // Pipeline diagnostics: token fingerprint only, DB counts and recent stored assets.
 router.get('/debug/facebook-pipeline', async (req, res, next) => {
   try {
@@ -200,6 +217,7 @@ router.get('/debug/facebook-pipeline', async (req, res, next) => {
       generatedAt: new Date().toISOString(),
       backend: { mode: store.demoMode() ? 'demo' : 'postgresql', nodeEnv: process.env.NODE_ENV || null, pageId: process.env.META_PAGE_ID || null },
       liveMeta: live,
+      metricsProbe: connection?.access_token ? await platforms.debugFacebookMetricsProbe(connection.access_token, process.env.META_PAGE_ID) : null,
       assetFetch,
       metricsFetch,
       storage,

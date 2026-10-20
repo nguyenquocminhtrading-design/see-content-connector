@@ -189,6 +189,7 @@ function classifyMetaError(error, pageId, endpoint, status) {
   const subcode = error?.error_subcode ?? error?.error_sub_code ?? null;
   let reason = 'meta_api_error';
   let message = error?.message || `Meta API error (${status})`;
+  const metaMessage = message;
   if (code === 10 || /pages_read_engagement|Page Public Content Access/i.test(message)) {
     reason = 'missing_pages_read_engagement_or_public_content_access';
     message = 'Facebook token chưa có pages_read_engagement hoặc app chưa được cấp Page Public Content Access. Hãy tạo lại Page Access Token sau khi cấp quyền.';
@@ -196,7 +197,44 @@ function classifyMetaError(error, pageId, endpoint, status) {
     reason = 'expired_or_invalid_token';
   }
   console.warn(`[meta] page=${pageId} endpoint=${endpoint} status=${status} code=${code || 'unknown'} subcode=${subcode || 'none'} reason=${reason}`);
-  return { ok: false, message, reason, code: code || null, subcode, endpoint };
+  return { ok: false, message, metaMessage, reason, code: code || null, subcode, endpoint, status };
+}
+
+async function debugFacebookMetricsProbe(token, pageId = process.env.META_PAGE_ID) {
+  const result = { pageId, assetProbe: null, postId: null, fields: [] };
+  if (!token || !pageId) return { ok: false, message: 'Thiếu Facebook token hoặc META_PAGE_ID.', ...result };
+  const base = `${FB_API}/${pageId}`;
+  const assetRes = await fetch(`${base}/published_posts?fields=id,message,created_time&limit=1&access_token=${token}`);
+  const assetJson = await assetRes.json();
+  result.assetProbe = {
+    ok: !assetJson.error,
+    status: assetRes.status,
+    requestId: assetRes.headers.get('x-fb-trace-id') || assetRes.headers.get('x-fb-request-id') || null,
+    count: Array.isArray(assetJson.data) ? assetJson.data.length : 0,
+    error: assetJson.error ? classifyMetaError(assetJson.error, pageId, 'published_posts', assetRes.status) : null,
+  };
+  result.postId = assetJson.data?.[0]?.id || null;
+  if (!result.postId) return { ok: result.assetProbe.ok, ...result };
+  const probes = [
+    { name: 'likes', fields: 'likes.summary(true)' },
+    { name: 'comments', fields: 'comments.summary(true)' },
+    { name: 'shares', fields: 'shares' },
+    { name: 'all_metrics', fields: 'likes.summary(true),comments.summary(true),shares' },
+  ];
+  for (const probe of probes) {
+    const res = await fetch(`${FB_API}/${encodeURIComponent(result.postId)}?fields=${encodeURIComponent(probe.fields)}&access_token=${token}`);
+    const json = await res.json();
+    result.fields.push({
+      name: probe.name,
+      fields: probe.fields,
+      ok: !json.error,
+      status: res.status,
+      requestId: res.headers.get('x-fb-trace-id') || res.headers.get('x-fb-request-id') || null,
+      returnedKeys: json.error ? [] : Object.keys(json),
+      error: json.error ? classifyMetaError(json.error, result.postId, `post_metrics:${probe.name}`, res.status) : null,
+    });
+  }
+  return { ok: result.assetProbe.ok && result.fields.some((f) => f.ok), ...result };
 }
 
 async function debugMetaToken(token, pageId = process.env.META_PAGE_ID) {
@@ -416,6 +454,7 @@ module.exports = {
   refreshConnection,
   fetchLatestAssets,
   fetchFacebookPostMetrics,
+  debugFacebookMetricsProbe,
   baseRedirect,
   exchangeForPermanentPageToken,
   debugMetaToken,
